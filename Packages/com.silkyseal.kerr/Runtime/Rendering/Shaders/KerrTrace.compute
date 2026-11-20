@@ -1,0 +1,40 @@
+// Per-pixel Kerr geodesic tracing. One thread per pixel, 8×8 groups.
+#pragma kernel CSTraceDirections
+
+#include "Geodesic.hlsl"
+
+// Camera tetrad in Kerr-Schild components, float4(x, y, z, t), built in double on the CPU.
+float3 _CamPos;
+float4 _CamU;
+float4 _CamRight;
+float4 _CamUp;
+float4 _CamForward;
+float _Spin;
+float _TanHalfFovY;
+float _Aspect;
+float _FarRadius;
+float _Tolerance;
+int _MaxSteps;
+int2 _Size;
+
+RWStructuredBuffer<float4> _Directions;
+
+// Past-directed null covector for the pixel centre; matches RayTracer.TracePixel.
+float4 PixelRay(uint2 id)
+{
+    float2 ndc = (float2(id) + 0.5) / float2(_Size) * 2.0 - 1.0;
+    float3 d = normalize(float3(ndc.x * _TanHalfFovY * _Aspect, ndc.y * _TanHalfFovY, 1.0));
+    float4 n = d.x * _CamRight + d.y * _CamUp + d.z * _CamForward;
+    return KerrLower(n - _CamU, _CamPos, _Spin);
+}
+
+// Debug and test kernel: writes (sky direction, status) per pixel.
+[numthreads(8, 8, 1)]
+void CSTraceDirections(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size)) return;
+    float3 skyDir;
+    int status;
+    TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status);
+    _Directions[id.y * _Size.x + id.x] = float4(skyDir, status);
+}
