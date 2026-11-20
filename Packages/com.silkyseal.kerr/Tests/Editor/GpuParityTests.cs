@@ -76,7 +76,7 @@ namespace SilkySeal.Kerr.Tests
         static double Sq(double v) => v * v;
 
         // Camera 80° from the spin axis at radius 15, looking at the hole, at rest in the ZAMO frame.
-        static CameraFrame TestFrame(double a)
+        internal static CameraFrame TestFrame(double a)
         {
             double theta = CameraPolarDegrees * Math.PI / 180;
             var pos = new Vector3d(CameraRadius * Math.Sin(theta), 0, CameraRadius * Math.Cos(theta));
