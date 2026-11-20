@@ -92,8 +92,7 @@ namespace SilkySeal.Kerr.Tests
         {
             if (!Escapes) throw new InvalidOperationException("Ray is captured; it never comes back out.");
 
-            double a = Spin, mino = MinoTime(_r0) + MinoTime(r);
-            double amplitude = Elliptic.Am(_w0 + _kappa * mino, _m);
+            double a = Spin, amplitude = AmplitudeAt(r);
             double u = Math.Sqrt(_uPlus) * Math.Sin(amplitude);
 
             // dφ/ds = −[a(2r − aλ)/Δ + λ/sin²θ] along a past-directed trace; split a(2r − aλ)/Δ at r₊ and r₋.
@@ -108,6 +107,17 @@ namespace SilkySeal.Kerr.Tests
             return new Vector3d(sinTheta * (r * Math.Cos(phiTilde) - a * Math.Sin(phiTilde)),
                                 sinTheta * (r * Math.Sin(phiTilde) + a * Math.Cos(phiTilde)),
                                 r * u);
+        }
+
+        /// <summary>Times the ray has passed z = 0 by the time it is back out at r: cos θ ∝ sin(am) vanishes at am = jπ.</summary>
+        public int EquatorCrossingsTo(double r) =>
+            (int)(Math.Floor(AmplitudeAt(r) / Math.PI) - Math.Floor(_amplitude0 / Math.PI));
+
+        // Jacobi amplitude of the angular motion after the full Mino time: in to R4, then out to r.
+        double AmplitudeAt(double r)
+        {
+            if (!Escapes) throw new InvalidOperationException("Ray is captured; it never comes back out.");
+            return Elliptic.Am(_w0 + _kappa * (MinoTime(_r0) + MinoTime(r)), _m);
         }
 
         // Φ(r) = ∫ a/Δ dr, zero at infinity.

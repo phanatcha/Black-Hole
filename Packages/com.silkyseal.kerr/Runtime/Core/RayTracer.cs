@@ -32,6 +32,8 @@ namespace SilkySeal.Kerr
         public Vector3d SkyDirection;
         public int Steps;
         public double MaxAbsHamiltonian;
+        /// <summary>Times the ray passed through the equatorial plane z = 0 (sign changes of z between steps).</summary>
+        public int EquatorCrossings;
     }
 
     /// <summary>Traces past-directed null geodesics from the camera back to their source.</summary>
@@ -61,13 +63,15 @@ namespace SilkySeal.Kerr
             double maxAbsH = Math.Abs(KerrSchild.Hamiltonian(x, k0Lower, a));
 
             var status = RayStatus.MaxSteps;
-            int steps = 0;
+            int steps = 0, crossings = 0;
             for (; steps < s.MaxSteps; steps++)
             {
                 if (KerrSchild.Radius(x, a) <= captureRadius) { status = RayStatus.Captured; break; }
                 if (x.Length >= s.FarRadius) { status = RayStatus.Escaped; break; }
-                if (GeodesicIntegrator.Step(ref x, ref p, pt, a, ref h, s.Tolerance))
-                    maxAbsH = Math.Max(maxAbsH, Math.Abs(KerrSchild.Hamiltonian(x, new Vector4d(pt, p), a)));
+                double zBefore = x.Z;
+                if (!GeodesicIntegrator.Step(ref x, ref p, pt, a, ref h, s.Tolerance)) continue;
+                maxAbsH = Math.Max(maxAbsH, Math.Abs(KerrSchild.Hamiltonian(x, new Vector4d(pt, p), a)));
+                if (zBefore * x.Z < 0) crossings++;
             }
 
             var momentum = new Vector4d(pt, p);
@@ -79,6 +83,7 @@ namespace SilkySeal.Kerr
                 SkyDirection = KerrSchild.Raise(momentum, x, a).Spatial.Normalized,
                 Steps = steps,
                 MaxAbsHamiltonian = maxAbsH,
+                EquatorCrossings = crossings,
             };
         }
 

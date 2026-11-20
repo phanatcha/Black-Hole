@@ -81,6 +81,8 @@ namespace SilkySeal.Kerr.Tests
             var error = new double[Columns * Rows];
             var agrees = new bool[Columns * Rows];
             var escaped = new bool[Columns * Rows];
+            var crossings = new int[Columns * Rows];
+            var crossingsAgree = new bool[Columns * Rows];
 
             Parallel.For(0, error.Length, i =>
             {
@@ -94,23 +96,29 @@ namespace SilkySeal.Kerr.Tests
                 {
                     var expected = ray.PositionAt(KerrSchild.Radius(traced.Position, a));
                     error[i] = (traced.Position - expected).Length / traced.Position.Length;
+                    crossings[i] = traced.EquatorCrossings;
+                    crossingsAgree[i] = traced.EquatorCrossings == ray.EquatorCrossingsTo(KerrSchild.Radius(traced.Position, a));
                 }
             });
 
-            int escapedCount = 0, disagreements = 0;
+            int escapedCount = 0, disagreements = 0, crossingMismatches = 0, mostCrossings = 0;
             double maxError = 0;
             for (int i = 0; i < error.Length; i++)
             {
                 if (escaped[i]) escapedCount++;
                 if (!agrees[i]) disagreements++;
+                if (escaped[i] && agrees[i] && !crossingsAgree[i]) crossingMismatches++;
+                mostCrossings = Math.Max(mostCrossings, crossings[i]);
                 maxError = Math.Max(maxError, error[i]);
             }
             Debug.Log($"[AnalyticParity a={a}] escaped {escapedCount}/{error.Length}, disagreements {disagreements}, " +
-                      $"max end-point error {maxError:E2} rad");
+                      $"max end-point error {maxError:E2} rad, crossing mismatches {crossingMismatches}, most crossings {mostCrossings}");
 
             Assert.Greater(escapedCount, error.Length / 2, "most rays should escape");
             Assert.AreEqual(0, disagreements, "capture/escape must match the root structure");
             Assert.Less(maxError, EndPointTolerance);
+            Assert.AreEqual(0, crossingMismatches, "equator crossings must match the analytic θ oscillation");
+            Assert.GreaterOrEqual(mostCrossings, 2, "grid should include rays that wrap past the hole");
         }
     }
 }
