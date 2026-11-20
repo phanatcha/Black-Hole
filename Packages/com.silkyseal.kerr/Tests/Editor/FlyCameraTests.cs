@@ -10,6 +10,9 @@ namespace SilkySeal.Kerr.Tests
         // Serialized defaults of FlyCamera.
         const float BaseSpeed = 5f, BoostMultiplier = 5f, LookDegreesPerPixel = 0.1f;
         const float Tolerance = 1e-4f;
+        const float Frame = 1f / 60, SettleSeconds = 3f; // 3 s is 20 smoothing time constants: within 1e-8 of target
+        // Speed is read back from float positions tens of units out, so compare it relatively.
+        const float VelocityTolerance = 1e-4f;
 
         Keyboard _keyboard;
         Mouse _mouse;
@@ -37,8 +40,7 @@ namespace SilkySeal.Kerr.Tests
         public void W_MovesForwardAtBaseSpeed()
         {
             Press(_keyboard.wKey);
-            _fly.Tick(1f);
-            Assert.That(Vector3.Distance(_go.transform.position, Vector3.forward * BaseSpeed), Is.LessThan(Tolerance));
+            AssertVelocity(Vector3.forward * BaseSpeed);
         }
 
         [Test]
@@ -46,8 +48,35 @@ namespace SilkySeal.Kerr.Tests
         {
             Press(_keyboard.leftShiftKey);
             Press(_keyboard.eKey);
-            _fly.Tick(1f);
-            Assert.That(Vector3.Distance(_go.transform.position, Vector3.up * BaseSpeed * BoostMultiplier), Is.LessThan(Tolerance));
+            AssertVelocity(Vector3.up * BaseSpeed * BoostMultiplier);
+        }
+
+        [Test]
+        public void SwitchingDToA_EasesThroughStopInsteadOfSnapping()
+        {
+            Press(_keyboard.dKey);
+            AssertVelocity(Vector3.right * BaseSpeed);
+
+            Release(_keyboard.dKey);
+            Press(_keyboard.aKey);
+            var before = _go.transform.position;
+            _fly.Tick(Frame);
+            float firstFrameVelocity = (_go.transform.position.x - before.x) / Frame;
+            Assert.That(firstFrameVelocity, Is.GreaterThan(0), "one frame after the switch the camera should still drift right");
+
+            AssertVelocity(Vector3.left * BaseSpeed);
+        }
+
+        void AssertVelocity(Vector3 expected) =>
+            Assert.That(Vector3.Distance(SettledVelocity(), expected), Is.LessThan(VelocityTolerance * expected.magnitude));
+
+        // Ticks at 60 fps until the eased velocity has caught up, then measures it over one frame.
+        Vector3 SettledVelocity()
+        {
+            for (float t = 0; t < SettleSeconds; t += Frame) _fly.Tick(Frame);
+            var before = _go.transform.position;
+            _fly.Tick(Frame);
+            return (_go.transform.position - before) / Frame;
         }
 
         [Test]

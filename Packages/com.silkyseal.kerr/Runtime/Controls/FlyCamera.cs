@@ -5,7 +5,8 @@ namespace SilkySeal.Kerr.Controls
 {
     /// <summary>
     /// Free-flight camera: WASD to move, Q/E down/up, hold the right mouse button to look,
-    /// Shift for a speed boost, scroll to change the base speed. It only moves the Transform;
+    /// Shift for a speed boost, scroll to change the base speed. Velocity eases toward the keys, so switching
+    /// A to D glides through a stop instead of snapping. It only moves the Transform;
     /// KerrObserver reads the motion from there, so controls and physics stay independent.
     /// Actions are built in code so the package does not depend on a project's input asset.
     /// </summary>
@@ -21,6 +22,8 @@ namespace SilkySeal.Kerr.Controls
         [SerializeField, Min(0)] float lookDegreesPerPixel = 0.1f;
         [Tooltip("Base speed is multiplied or divided by this per scroll notch.")]
         [SerializeField, Range(1.01f, 2f)] float scrollSpeedStep = 1.2f;
+        [Tooltip("Seconds for velocity to cover ~63% of the way to the keys' target. 0 snaps instantly.")]
+        [SerializeField, Min(0)] float moveSmoothing = 0.15f;
 
         readonly InputAction _move = Composite2D("Move", "w", "s", "a", "d");
         readonly InputAction _vertical = Composite1D("Vertical", "q", "e");
@@ -30,6 +33,7 @@ namespace SilkySeal.Kerr.Controls
         readonly InputAction _scroll = new InputAction("Scroll", InputActionType.Value, "<Mouse>/scroll/y");
 
         float _yaw, _pitch;
+        Vector3 _velocity;
 
         void OnEnable() => SetInputEnabled(true);
         void OnDisable() => SetInputEnabled(false);
@@ -48,6 +52,7 @@ namespace SilkySeal.Kerr.Controls
 
         internal void SetInputEnabled(bool enabled)
         {
+            _velocity = Vector3.zero;
             if (enabled)
             {
                 var euler = transform.eulerAngles;
@@ -80,8 +85,10 @@ namespace SilkySeal.Kerr.Controls
 
             var move = _move.ReadValue<Vector2>();
             var direction = t.right * move.x + t.forward * move.y + t.up * _vertical.ReadValue<float>();
-            float speed = baseSpeed * (_boost.IsPressed() ? boostMultiplier : 1f);
-            t.position += direction * (speed * dt);
+            var target = direction * (baseSpeed * (_boost.IsPressed() ? boostMultiplier : 1f));
+            // Exponential approach: the same feel at any frame rate, unlike a per-frame lerp factor.
+            _velocity = moveSmoothing > 0 ? Vector3.Lerp(_velocity, target, 1 - Mathf.Exp(-dt / moveSmoothing)) : target;
+            t.position += _velocity * dt;
         }
 
         static void SetEnabled(InputAction action, bool enabled)
