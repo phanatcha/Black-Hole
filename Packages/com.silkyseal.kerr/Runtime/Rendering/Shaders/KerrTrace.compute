@@ -1,0 +1,91 @@
+// Per-pixel Kerr geodesic tracing. One thread per pixel, 8×8 groups.
+#pragma kernel CSTraceDirections
+#pragma kernel CSRender
+#pragma kernel CSMeasureExposure
+
+#include "Geodesic.hlsl"
+#include "Sky.hlsl"
+#include "Exposure.hlsl"
+
+// Camera tetrad in Kerr-Schild components, float4(x, y, z, t), built in double on the CPU.
+float3 _CamPos;
+float4 _CamU;
+float4 _CamRight;
+float4 _CamUp;
+float4 _CamForward;
+float _Spin;
+float _TanHalfFovY;
+float _Aspect;
+float _FarRadius;
+float _Tolerance;
+int _MaxSteps;
+int2 _Size;
+
+RWStructuredBuffer<float4> _Directions;
+
+// CSRender only.
+RWTexture2D<float4> _Output;
+TextureCube _Sky;
+SamplerState sampler_Sky;
+float _UseSky;
+int _Blackout;
+float4x4 _HoleToWorld;
+float _SkyLuminance;   // cd/m² of a sky texel valued 1
+
+// Past-directed null covector for the pixel centre; matches RayTracer.TracePixel.
+float4 PixelRay(uint2 id)
+{
+    float2 ndc = (float2(id) + 0.5) / float2(_Size) * 2.0 - 1.0;
+    float3 d = normalize(float3(ndc.x * _TanHalfFovY * _Aspect, ndc.y * _TanHalfFovY, 1.0));
+    float4 n = d.x * _CamRight + d.y * _CamUp + d.z * _CamForward;
+    return KerrLower(n - _CamU, _CamPos, _Spin);
+}
+
+// Debug and test kernel: writes (sky direction, status) per pixel.
+[numthreads(8, 8, 1)]
+void CSTraceDirections(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size)) return;
+    float3 skyDir, radiance;
+    float transmittance;
+    int status;
+    TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status, radiance, transmittance);
+    _Directions[id.y * _Size.x + id.x] = float4(skyDir, status);
+}
+
+// Lensed frame: disk light in front of the sky where the ray escapes, black where it falls in. One ray per pixel.
+// Output is scene luminance times last frame's exposure, clamped below the RGBA16F maximum so bloom never sees
+// infinity; each 4th pixel's unexposed luminance also goes to the meter.
+[numthreads(8, 8, 1)]
+void CSRender(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size)) return;
+    float3 color = 0.0;
+    if (_Blackout == 0)
+    {
+        float3 skyDir;
+        float transmittance;
+        int status;
+        TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status, color, transmittance);
+        if (status == KERR_STATUS_ESCAPED)
+        {
+            // Kerr-Schild (x, y, z) is hole-local (x, z, y); the matrix may carry scale, so renormalize.
+            float3 world = normalize(mul((float3x3)_HoleToWorld, skyDir.xzy));
+            float3 sky = _UseSky > 0.5 ? _Sky.SampleLevel(sampler_Sky, world, 0).rgb : KerrGridSky(world);
+            color += transmittance * _SkyLuminance * sky;
+        }
+    }
+    if (all(id.xy % KERR_METER_STRIDE == 0))
+    {
+        uint meterWidth = (_Size.x + KERR_METER_STRIDE - 1) / KERR_METER_STRIDE;
+        _MeterSamples[(id.y / KERR_METER_STRIDE) * meterWidth + id.x / KERR_METER_STRIDE] = KerrLuminance(color);
+    }
+    _Output[id.xy] = float4(min(color * KerrExposure(), 65000.0), 1.0);
+}
+
+// Eye adaptation from this frame's meter samples into the EV100 state the next frame is exposed with. One group.
+[numthreads(KERR_METER_THREADS, 1, 1)]
+void CSMeasureExposure(uint3 tid : SV_GroupThreadID)
+{
+    KerrMeasureExposure(tid.x);
+}

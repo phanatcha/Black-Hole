@@ -1,0 +1,21 @@
+{
+  "name": "com.silkyseal.kerr",
+  "version": "0.1.0",
+  "displayName": "SilkySeal Kerr Black Hole",
+  "description": "Real-time spinning (Kerr) black hole for URP: GPU null-geodesic tracing in Kerr-Schild coordinates, checked against a double-precision C# reference.",
+  "unity": "6000.4",
+  "author": {
+    "name": "SilkySeal"
+  },
+  "keywords": [
+    "black hole",
+    "kerr",
+    "general relativity",
+    "ray tracing",
+    "urp"
+  ],
+  "dependencies": {
+    "com.unity.render-pipelines.universal": "17.4.0",
+    "com.unity.inputsystem": "1.19.0"
+  }
+}
