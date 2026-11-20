@@ -2,8 +2,8 @@ using System;
 
 namespace SilkySeal.Kerr
 {
-    /// <summary>How a backward-traced light ray ended.</summary>
-    public enum RayStatus { Escaped, Captured, MaxSteps }
+    /// <summary>How a backward-traced light ray ended. Absorbed: an <see cref="IEquatorObserver"/> stopped it.</summary>
+    public enum RayStatus { Escaped, Captured, MaxSteps, Absorbed }
 
     /// <summary>Integration limits for one ray.</summary>
     public struct TraceSettings
@@ -36,6 +36,19 @@ namespace SilkySeal.Kerr
         public int EquatorCrossings;
     }
 
+    /// <summary>
+    /// Sees each pass of a ray through the equatorial plane, where a thin disk lives. A struct so the tracer's loop
+    /// stays allocation-free and the call inlines.
+    /// </summary>
+    public interface IEquatorObserver
+    {
+        /// <summary>
+        /// x: crossing point (z ≈ 0, interpolated between steps). kt, kPhi: the ray's conserved k_t and
+        /// k_φ = x k_y − y k_x. Return false to stop the ray as absorbed.
+        /// </summary>
+        bool OnEquatorCrossing(Vector3d x, double kt, double kPhi);
+    }
+
     /// <summary>Traces past-directed null geodesics from the camera back to their source.</summary>
     public static class RayTracer
     {
@@ -55,6 +68,14 @@ namespace SilkySeal.Kerr
         /// </summary>
         public static RayResult Trace(Vector3d x0, Vector4d k0Lower, in TraceSettings s)
         {
+            var none = default(NoObserver);
+            return Trace(x0, k0Lower, s, ref none);
+        }
+
+        /// <summary>As <see cref="Trace(Vector3d, Vector4d, in TraceSettings)"/>, reporting equator crossings to observer.</summary>
+        public static RayResult Trace<T>(Vector3d x0, Vector4d k0Lower, in TraceSettings s, ref T observer)
+            where T : struct, IEquatorObserver
+        {
             double a = s.Spin, pt = k0Lower.T;
             double captureRadius = KerrSchild.HorizonRadius(a) + HorizonMargin;
             var x = x0;
@@ -68,10 +89,14 @@ namespace SilkySeal.Kerr
             {
                 if (KerrSchild.Radius(x, a) <= captureRadius) { status = RayStatus.Captured; break; }
                 if (x.Length >= s.FarRadius) { status = RayStatus.Escaped; break; }
-                double zBefore = x.Z;
+                var before = x;
                 if (!GeodesicIntegrator.Step(ref x, ref p, pt, a, ref h, s.Tolerance)) continue;
                 maxAbsH = Math.Max(maxAbsH, Math.Abs(KerrSchild.Hamiltonian(x, new Vector4d(pt, p), a)));
-                if (zBefore * x.Z < 0) crossings++;
+                if (before.Z * x.Z >= 0) continue;
+
+                crossings++;
+                var crossing = before + (x - before) * (before.Z / (before.Z - x.Z));
+                if (!observer.OnEquatorCrossing(crossing, pt, x.X * p.Y - x.Y * p.X)) { status = RayStatus.Absorbed; break; }
             }
 
             var momentum = new Vector4d(pt, p);
@@ -85,6 +110,11 @@ namespace SilkySeal.Kerr
                 MaxAbsHamiltonian = maxAbsH,
                 EquatorCrossings = crossings,
             };
+        }
+
+        struct NoObserver : IEquatorObserver
+        {
+            public bool OnEquatorCrossing(Vector3d x, double kt, double kPhi) => true;
         }
 
         /// <summary>
