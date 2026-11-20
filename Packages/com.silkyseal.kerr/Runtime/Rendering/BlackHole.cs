@@ -13,7 +13,7 @@ namespace SilkySeal.Kerr.Rendering
     [DisallowMultipleComponent]
     public sealed class BlackHole : MonoBehaviour
     {
-        // Upper bound keeps r₊ − r_photon above RayTracer.HorizonMargin; a = 1 has no horizon gap at all.
+        // Upper bound keeps the prograde photon orbit more than RayTracer.HorizonMargin outside r₊; at a = 1 they touch.
         const float MaxSpin = 0.9999f;
 
         [Tooltip("Dimensionless spin a/M. 0 is Schwarzschild; the Gargantua of Interstellar used 0.6.")]
@@ -38,10 +38,8 @@ namespace SilkySeal.Kerr.Rendering
         public float SpeedOfLight => speedOfLight;
         public Cubemap Sky => sky;
 
-        // With domain reload off, statics survive entering Play mode; start from an empty registry.
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetRegistry() => s_Active.Clear();
-
+        // OnEnable/OnDisable always pair (destroy included), so the list stays correct even when domain
+        // reload is off. Never clear it on load: with scene reload off, live holes would not re-register.
         void OnEnable() => s_Active.Add(this);
         void OnDisable() => s_Active.Remove(this);
 
