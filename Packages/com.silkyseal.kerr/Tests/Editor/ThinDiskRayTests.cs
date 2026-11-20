@@ -70,6 +70,32 @@ namespace SilkySeal.Kerr.Tests
             Assert.Greater(left.Radiance.Z / left.Radiance.X, right.Radiance.Z / right.Radiance.X);
         }
 
+        [Test]
+        public void HitRadius_AtGpuTolerance_MatchesTheReference()
+        {
+            // Big steps at the GPU's tolerance must still place the crossing where the tight reference does. Measured:
+            // a chord between step ends misses by 1 %, the Hermite crossing by 1e-4 (the loose path itself).
+            // 1e-3 sits a decade from both and keeps colour within ~0.5 %.
+            var disk = ThinDisk.FromPeakTemperature(0.9, 30, 6000);
+            var frame = GpuParityTests.TestFrame(0.9);
+            var tight = TraceSettings.Reference(0.9);
+            var loose = tight;
+            loose.Tolerance = 1e-5;
+            double tanHalfFov = Math.Tan(Math.PI / 6), worst = 0;
+            for (double ndcX = -0.9; ndcX <= 0.9; ndcX += 0.3)
+            for (double ndcY = -0.9; ndcY <= 0.3; ndcY += 0.3)
+            {
+                var k = RayTracer.PixelRay(frame, ndcX, ndcY, tanHalfFov, 16.0 / 9);
+                var reference = new ThinDiskRay(disk, 1, true);
+                var coarse = new ThinDiskRay(disk, 1, true);
+                RayTracer.Trace(frame.Position, k, tight, ref reference);
+                RayTracer.Trace(frame.Position, k, loose, ref coarse);
+                if (double.IsNaN(reference.FirstHitRadius)) continue;
+                worst = Math.Max(worst, Math.Abs(coarse.FirstHitRadius / reference.FirstHitRadius - 1));
+            }
+            Assert.Less(worst, 1e-3);
+        }
+
         // A Schwarzschild ray from a static camera on the +z axis, aimed at (aim, 0, 0) on the equator.
         static RayResult TraceMeridional(double aim, ref ThinDiskRay observer)
         {

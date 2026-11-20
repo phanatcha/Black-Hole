@@ -90,12 +90,14 @@ namespace SilkySeal.Kerr
                 if (KerrSchild.Radius(x, a) <= captureRadius) { status = RayStatus.Captured; break; }
                 if (x.Length >= s.FarRadius) { status = RayStatus.Escaped; break; }
                 var before = x;
+                var pBefore = p;
+                double stepSize = h;
                 if (!GeodesicIntegrator.Step(ref x, ref p, pt, a, ref h, s.Tolerance)) continue;
                 maxAbsH = Math.Max(maxAbsH, Math.Abs(KerrSchild.Hamiltonian(x, new Vector4d(pt, p), a)));
                 if (before.Z * x.Z >= 0) continue;
 
                 crossings++;
-                var crossing = before + (x - before) * (before.Z / (before.Z - x.Z));
+                var crossing = EquatorCrossing(before, pBefore, x, p, pt, a, stepSize);
                 if (!observer.OnEquatorCrossing(crossing, pt, x.X * p.Y - x.Y * p.X)) { status = RayStatus.Absorbed; break; }
             }
 
@@ -110,6 +112,28 @@ namespace SilkySeal.Kerr
                 MaxAbsHamiltonian = maxAbsH,
                 EquatorCrossings = crossings,
             };
+        }
+
+        /// <summary>
+        /// Where one accepted step of length h in the affine parameter meets z = 0: the root of the cubic Hermite through
+        /// both ends and their velocities dx/dλ. Error O(h⁴) where the chord's is O(h²); at the GPU tolerance a chord
+        /// puts the hit radius ~0.5 % off, a 2–3 % colour error on a cool disk.
+        /// </summary>
+        static Vector3d EquatorCrossing(Vector3d x0, Vector3d p0, Vector3d x1, Vector3d p1, double pt, double a, double h)
+        {
+            var v0 = KerrSchild.Raise(new Vector4d(pt, p0), x0, a).Spatial * h;
+            var v1 = KerrSchild.Raise(new Vector4d(pt, p1), x1, a).Spatial * h;
+            // z changes sign over [0, 1], so Newton from the chord's root stays in the bracket.
+            double t = x0.Z / (x0.Z - x1.Z);
+            for (int i = 0; i < 3; i++)
+            {
+                double t2 = t * t;
+                double z = (2 * t2 * t - 3 * t2 + 1) * x0.Z + (t2 * t - 2 * t2 + t) * v0.Z + (3 * t2 - 2 * t2 * t) * x1.Z + (t2 * t - t2) * v1.Z;
+                double dz = (6 * t2 - 6 * t) * (x0.Z - x1.Z) + (3 * t2 - 4 * t + 1) * v0.Z + (3 * t2 - 2 * t) * v1.Z;
+                t = Math.Min(1, Math.Max(0, t - z / dz));
+            }
+            double s2 = t * t, s3 = s2 * t;
+            return x0 * (2 * s3 - 3 * s2 + 1) + v0 * (s3 - 2 * s2 + t) + x1 * (3 * s2 - 2 * s3) + v1 * (s3 - s2);
         }
 
         struct NoObserver : IEquatorObserver
