@@ -12,9 +12,11 @@ namespace SilkySeal.Kerr.Tests
     /// </summary>
     public class GpuParityTests
     {
-        const string ShaderPath = "Packages/com.silkyseal.kerr/Runtime/Rendering/Shaders/KerrTrace.compute";
-        const int GridWidth = 161, GridHeight = 91, ThreadGroupSize = 8;
-        const double VerticalFov = Math.PI / 3, Aspect = 16.0 / 9.0, ReferenceLines = 1080;
+        internal const string ShaderPath = "Packages/com.silkyseal.kerr/Runtime/Rendering/Shaders/KerrTrace.compute";
+        internal const int GridWidth = 161, GridHeight = 91;
+        const int ThreadGroupSize = 8;
+        internal const double VerticalFov = Math.PI / 3, Aspect = 16.0 / 9.0;
+        const double ReferenceLines = 1080;
         const double CameraRadius = 15, CameraPolarDegrees = 80;
         const double RequiredWithinPixelFraction = 0.99;
         const double AllowedMaxStepsFraction = 0.005;
@@ -85,7 +87,7 @@ namespace SilkySeal.Kerr.Tests
         }
 
         // Pixel centres, same convention as the kernel: ndc = (id + 0.5) / size * 2 − 1.
-        static double Ndc(int i, int size) => (i + 0.5) / size * 2 - 1;
+        internal static double Ndc(int i, int size) => (i + 0.5) / size * 2 - 1;
 
         static RayResult[] RunCpu(CameraFrame frame)
         {
@@ -107,21 +109,13 @@ namespace SilkySeal.Kerr.Tests
             var buffer = new ComputeBuffer(GridWidth * GridHeight, sizeof(float) * 4);
             try
             {
-                shader.SetVector("_CamPos", ToFloat(f.Position));
-                shader.SetVector("_CamU", ToFloat(f.U));
-                shader.SetVector("_CamRight", ToFloat(f.Right));
-                shader.SetVector("_CamUp", ToFloat(f.Up));
-                shader.SetVector("_CamForward", ToFloat(f.Forward));
-                shader.SetFloat("_Spin", (float)f.Spin);
-                shader.SetFloat("_TanHalfFovY", (float)Math.Tan(VerticalFov / 2));
-                shader.SetFloat("_Aspect", (float)Aspect);
-                shader.SetFloat("_FarRadius", GpuFarRadius);
-                shader.SetFloat("_Tolerance", GpuTolerance);
-                shader.SetInt("_MaxSteps", GpuMaxSteps);
-                shader.SetInts("_Size", GridWidth, GridHeight);
+                SetCamera(shader, f);
+                // The disk is off, but Metal still wants every texture the kernel declares bound.
+                shader.SetInt("_DiskEnabled", 0);
+                shader.SetTexture(kernel, "_DiskFlux", Texture2D.blackTexture);
+                shader.SetTexture(kernel, "_Blackbody", Texture2D.blackTexture);
                 shader.SetBuffer(kernel, "_Directions", buffer);
-                shader.Dispatch(kernel, (GridWidth + ThreadGroupSize - 1) / ThreadGroupSize,
-                                (GridHeight + ThreadGroupSize - 1) / ThreadGroupSize, 1);
+                Dispatch(shader, kernel);
                 var data = new Vector4[GridWidth * GridHeight];
                 buffer.GetData(data);
                 return data;
@@ -131,6 +125,27 @@ namespace SilkySeal.Kerr.Tests
                 buffer.Release();
             }
         }
+
+        // Camera, grid and integrator settings shared by every kernel; compute parameters persist on the asset.
+        internal static void SetCamera(ComputeShader shader, CameraFrame f)
+        {
+            shader.SetVector("_CamPos", ToFloat(f.Position));
+            shader.SetVector("_CamU", ToFloat(f.U));
+            shader.SetVector("_CamRight", ToFloat(f.Right));
+            shader.SetVector("_CamUp", ToFloat(f.Up));
+            shader.SetVector("_CamForward", ToFloat(f.Forward));
+            shader.SetFloat("_Spin", (float)f.Spin);
+            shader.SetFloat("_TanHalfFovY", (float)Math.Tan(VerticalFov / 2));
+            shader.SetFloat("_Aspect", (float)Aspect);
+            shader.SetFloat("_FarRadius", GpuFarRadius);
+            shader.SetFloat("_Tolerance", GpuTolerance);
+            shader.SetInt("_MaxSteps", GpuMaxSteps);
+            shader.SetInts("_Size", GridWidth, GridHeight);
+        }
+
+        internal static void Dispatch(ComputeShader shader, int kernel) =>
+            shader.Dispatch(kernel, (GridWidth + ThreadGroupSize - 1) / ThreadGroupSize,
+                            (GridHeight + ThreadGroupSize - 1) / ThreadGroupSize, 1);
 
         // HLSL side stores 4-vectors as (x, y, z, t) so .xyz is the spatial part.
         static Vector4 ToFloat(Vector4d v) => new Vector4((float)v.X, (float)v.Y, (float)v.Z, (float)v.T);

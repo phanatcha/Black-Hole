@@ -28,6 +28,8 @@ SamplerState sampler_Sky;
 float _UseSky;
 int _Blackout;
 float4x4 _HoleToWorld;
+float _SkyLuminance;   // cd/m² of a sky texel valued 1
+float _Exposure;       // scene luminance to output units
 
 // Past-directed null covector for the pixel centre; matches RayTracer.TracePixel.
 float4 PixelRay(uint2 id)
@@ -43,13 +45,15 @@ float4 PixelRay(uint2 id)
 void CSTraceDirections(uint3 id : SV_DispatchThreadID)
 {
     if (any(id.xy >= (uint2)_Size)) return;
-    float3 skyDir;
+    float3 skyDir, radiance;
+    float transmittance;
     int status;
-    TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status);
+    TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status, radiance, transmittance);
     _Directions[id.y * _Size.x + id.x] = float4(skyDir, status);
 }
 
-// Lensed frame: sky where the ray escapes, black where it falls in. One ray per pixel.
+// Lensed frame: disk light in front of the sky where the ray escapes, black where it falls in. One ray per pixel.
+// Output is exposed scene luminance, clamped below the RGBA16F maximum so bloom never sees infinity.
 [numthreads(8, 8, 1)]
 void CSRender(uint3 id : SV_DispatchThreadID)
 {
@@ -58,14 +62,16 @@ void CSRender(uint3 id : SV_DispatchThreadID)
     if (_Blackout == 0)
     {
         float3 skyDir;
+        float transmittance;
         int status;
-        TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status);
+        TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status, color, transmittance);
         if (status == KERR_STATUS_ESCAPED)
         {
             // Kerr-Schild (x, y, z) is hole-local (x, z, y); the matrix may carry scale, so renormalize.
             float3 world = normalize(mul((float3x3)_HoleToWorld, skyDir.xzy));
-            color = _UseSky > 0.5 ? _Sky.SampleLevel(sampler_Sky, world, 0).rgb : KerrGridSky(world);
+            float3 sky = _UseSky > 0.5 ? _Sky.SampleLevel(sampler_Sky, world, 0).rgb : KerrGridSky(world);
+            color += transmittance * _SkyLuminance * sky;
         }
     }
-    _Output[id.xy] = float4(color, 1.0);
+    _Output[id.xy] = float4(min(color * _Exposure, 65000.0), 1.0);
 }

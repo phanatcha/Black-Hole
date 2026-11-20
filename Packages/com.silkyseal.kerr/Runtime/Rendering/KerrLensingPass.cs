@@ -40,17 +40,26 @@ namespace SilkySeal.Kerr.Rendering
         static readonly int s_UseSky = Shader.PropertyToID("_UseSky");
         static readonly int s_Blackout = Shader.PropertyToID("_Blackout");
         static readonly int s_HoleToWorld = Shader.PropertyToID("_HoleToWorld");
+        static readonly int s_SkyLuminance = Shader.PropertyToID("_SkyLuminance");
+        static readonly int s_Exposure = Shader.PropertyToID("_Exposure");
+        static readonly int s_DiskEnabled = Shader.PropertyToID("_DiskEnabled");
+        static readonly int s_DiskShifts = Shader.PropertyToID("_DiskShifts");
+        static readonly int s_DiskOpacity = Shader.PropertyToID("_DiskOpacity");
+        static readonly int s_DiskRange = Shader.PropertyToID("_DiskRange");
+        static readonly int s_DiskFlux = Shader.PropertyToID("_DiskFlux");
+        static readonly int s_Blackbody = Shader.PropertyToID("_Blackbody");
+        static readonly int s_BlackbodyRange = Shader.PropertyToID("_BlackbodyRange");
 
         // Transient per-recording data; every field is written in Fill before the pass executes.
         sealed class PassData
         {
             public ComputeShader shader;
             public int kernel;
-            public TextureHandle output, sky;
-            public Vector4 camPos, camU, camRight, camUp, camForward;
+            public TextureHandle output, sky, diskFlux, blackbody;
+            public Vector4 camPos, camU, camRight, camUp, camForward, diskRange;
             public Matrix4x4 holeToWorld;
-            public float spin, tanHalfFovY, aspect, farRadius, useSky;
-            public int blackout;
+            public float spin, tanHalfFovY, aspect, farRadius, useSky, skyLuminance, exposure, diskOpacity;
+            public int blackout, diskEnabled, diskShifts;
             public readonly int[] size = new int[2];
         }
 
@@ -58,8 +67,8 @@ namespace SilkySeal.Kerr.Rendering
         int _kernel;
         BlackHole _hole;
         KerrObserver _observer;
-        RTHandle _skyHandle;
-        Texture _skySource;
+        RTHandle _skyHandle, _diskFluxHandle, _blackbodyHandle;
+        Texture2D _blackbody;
 
         public KerrLensingPass()
         {
@@ -93,15 +102,22 @@ namespace SilkySeal.Kerr.Rendering
             desc.depthBufferBits = DepthBits.None;
             desc.clearBuffer = false;
             var output = renderGraph.CreateTexture(desc);
-            var sky = renderGraph.ImportTexture(SkyHandle());
+            var sky = renderGraph.ImportTexture(Wrap(ref _skyHandle, _hole.Sky != null ? _hole.Sky : CoreUtils.blackCubeTexture));
+            if (_blackbody == null) _blackbody = DiskTables.BakeBlackbody();
+            var blackbody = renderGraph.ImportTexture(Wrap(ref _blackbodyHandle, _blackbody));
+            var diskFlux = renderGraph.ImportTexture(Wrap(ref _diskFluxHandle, Texture2D.blackTexture));
 
             using (var builder = renderGraph.AddComputePass<PassData>("Kerr Trace", out var data))
             {
                 Fill(data, cameraData.camera, desc.width, desc.height);
                 data.output = output;
                 data.sky = sky;
+                data.blackbody = blackbody;
+                data.diskFlux = diskFlux;
                 builder.UseTexture(output, AccessFlags.Write);
                 builder.UseTexture(sky, AccessFlags.Read);
+                builder.UseTexture(blackbody, AccessFlags.Read);
+                builder.UseTexture(diskFlux, AccessFlags.Read);
                 builder.SetRenderFunc(static (PassData d, ComputeGraphContext ctx) => Execute(d, ctx));
             }
 
@@ -128,6 +144,13 @@ namespace SilkySeal.Kerr.Rendering
             d.camUp = ToFloat(f.Up);
             d.camForward = ToFloat(f.Forward);
             d.farRadius = Mathf.Max(MinFarRadius, FarRadiusPerCameraRadius * (float)f.Position.Length);
+
+            d.skyLuminance = 1;
+            d.exposure = 1;
+            d.diskEnabled = 0;
+            d.diskShifts = 0;
+            d.diskOpacity = 1;
+            d.diskRange = Vector4.zero;
         }
 
         static void Execute(PassData d, ComputeGraphContext ctx)
@@ -150,22 +173,29 @@ namespace SilkySeal.Kerr.Rendering
             cmd.SetComputeMatrixParam(d.shader, s_HoleToWorld, d.holeToWorld);
             cmd.SetComputeTextureParam(d.shader, d.kernel, s_Output, d.output);
             cmd.SetComputeTextureParam(d.shader, d.kernel, s_Sky, d.sky);
+            cmd.SetComputeFloatParam(d.shader, s_SkyLuminance, d.skyLuminance);
+            cmd.SetComputeFloatParam(d.shader, s_Exposure, d.exposure);
+            cmd.SetComputeIntParam(d.shader, s_DiskEnabled, d.diskEnabled);
+            cmd.SetComputeIntParam(d.shader, s_DiskShifts, d.diskShifts);
+            cmd.SetComputeFloatParam(d.shader, s_DiskOpacity, d.diskOpacity);
+            cmd.SetComputeVectorParam(d.shader, s_DiskRange, d.diskRange);
+            cmd.SetComputeVectorParam(d.shader, s_BlackbodyRange, DiskTables.BlackbodyRange);
+            cmd.SetComputeTextureParam(d.shader, d.kernel, s_DiskFlux, d.diskFlux);
+            cmd.SetComputeTextureParam(d.shader, d.kernel, s_Blackbody, d.blackbody);
             cmd.DispatchCompute(d.shader, d.kernel, (d.size[0] + ThreadGroupSize - 1) / ThreadGroupSize,
                                 (d.size[1] + ThreadGroupSize - 1) / ThreadGroupSize, 1);
         }
 
-        // Render graph only binds TextureHandles in compute passes, so the cubemap goes through an RTHandle,
-        // re-wrapped only when the hole's sky asset changes. A black cube keeps the slot bound when there is none.
-        RTHandle SkyHandle()
+        // Render graph only binds TextureHandles in compute passes, so plain textures go through an RTHandle,
+        // re-wrapped only when the source changes. Placeholders (black cube, black 2D) keep unused slots bound.
+        static RTHandle Wrap(ref RTHandle handle, Texture source)
         {
-            var source = _hole.Sky != null ? (Texture)_hole.Sky : CoreUtils.blackCubeTexture;
-            if (_skyHandle == null || _skySource != source)
+            if (handle == null || handle.externalTexture != source)
             {
-                _skyHandle?.Release();
-                _skyHandle = RTHandles.Alloc(source);
-                _skySource = source;
+                handle?.Release();
+                handle = RTHandles.Alloc(source);
             }
-            return _skyHandle;
+            return handle;
         }
 
         // HLSL side stores 4-vectors as (x, y, z, t).
@@ -175,8 +205,11 @@ namespace SilkySeal.Kerr.Rendering
         public void Dispose()
         {
             _skyHandle?.Release();
-            _skyHandle = null;
-            _skySource = null;
+            _diskFluxHandle?.Release();
+            _blackbodyHandle?.Release();
+            _skyHandle = _diskFluxHandle = _blackbodyHandle = null;
+            CoreUtils.Destroy(_blackbody);
+            _blackbody = null;
         }
     }
 }

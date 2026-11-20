@@ -2,6 +2,7 @@
 #define SILKYSEAL_KERR_GEODESIC_HLSL
 
 #include "KerrSchild.hlsl"
+#include "Disk.hlsl"
 
 // Float32 mirror of Runtime/Core/GeodesicIntegrator.cs and RayTracer.Trace. Keep the two in step:
 // GpuParityTests compares them ray by ray.
@@ -11,6 +12,7 @@
 #define KERR_STATUS_ESCAPED 0
 #define KERR_STATUS_CAPTURED 1
 #define KERR_STATUS_MAX_STEPS 2
+#define KERR_STATUS_ABSORBED 3
 
 static const float CK_B21 = 1.0 / 5.0;
 static const float CK_B31 = 3.0 / 40.0, CK_B32 = 9.0 / 40.0;
@@ -68,11 +70,34 @@ void GeodesicStep(inout float3 x, inout float3 p, float pt, float a, inout float
     }
 }
 
-// Traces a past-directed null covector kLower = (p_x, p_y, p_z, p_t) from x0.
+// Where one accepted step of length h meets z = 0: root of the cubic Hermite through both ends and their velocities.
+// Mirrors RayTracer.EquatorCrossing; a chord would put the hit radius ~0.5 % off at this tolerance.
+float3 EquatorCrossing(float3 x0, float3 p0, float3 x1, float3 p1, float pt, float a, float h)
+{
+    float3 v0 = KerrRaise(float4(p0, pt), x0, a).xyz * h;
+    float3 v1 = KerrRaise(float4(p1, pt), x1, a).xyz * h;
+    float t = x0.z / (x0.z - x1.z);
+    [unroll]
+    for (int i = 0; i < 3; i++)
+    {
+        float t2 = t * t;
+        float z = (2.0 * t2 * t - 3.0 * t2 + 1.0) * x0.z + (t2 * t - 2.0 * t2 + t) * v0.z
+                + (3.0 * t2 - 2.0 * t2 * t) * x1.z + (t2 * t - t2) * v1.z;
+        float dz = (6.0 * t2 - 6.0 * t) * (x0.z - x1.z) + (3.0 * t2 - 4.0 * t + 1.0) * v0.z + (3.0 * t2 - 2.0 * t) * v1.z;
+        t = saturate(t - z / dz);
+    }
+    float s2 = t * t, s3 = s2 * t;
+    return x0 * (2.0 * s3 - 3.0 * s2 + 1.0) + v0 * (s3 - 2.0 * s2 + t) + x1 * (3.0 * s2 - 2.0 * s3) + v1 * (s3 - s2);
+}
+
+// Traces a past-directed null covector kLower = (p_x, p_y, p_z, p_t) from x0, shading the disk on the way when
+// _DiskEnabled. radiance is the disk light collected, transmittance what still shows of the sky behind it.
 // Cost: at most maxSteps × 6 gradient evaluations.
 void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRadius, int maxSteps,
-              out float3 skyDir, out int status)
+              out float3 skyDir, out int status, out float3 radiance, out float transmittance)
 {
+    radiance = 0.0;
+    transmittance = 1.0;
     float captureRadius = KerrHorizonRadius(spin) + KERR_HORIZON_MARGIN;
     float3 x = x0;
     float3 p = kLower.xyz;
@@ -85,7 +110,18 @@ void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRa
     {
         if (KerrRadius(x, spin) <= captureRadius) { status = KERR_STATUS_CAPTURED; break; }
         if (length(x) >= farRadius) { status = KERR_STATUS_ESCAPED; break; }
+        float3 before = x, pBefore = p;
+        float stepSize = h;
         GeodesicStep(x, p, pt, spin, h, tolerance);
+        // A rejected step leaves x unchanged, so z² ≥ 0 and no crossing is seen twice.
+        if (_DiskEnabled == 0 || before.z * x.z >= 0.0) continue;
+
+        float3 crossing = EquatorCrossing(before, pBefore, x, p, pt, spin, stepSize);
+        if (!KerrDiskCrossing(crossing, pt, x.x * p.y - x.y * p.x, spin, radiance, transmittance))
+        {
+            status = KERR_STATUS_ABSORBED;
+            break;
+        }
     }
     skyDir = normalize(KerrRaise(float4(p, pt), x, spin).xyz);
 }
