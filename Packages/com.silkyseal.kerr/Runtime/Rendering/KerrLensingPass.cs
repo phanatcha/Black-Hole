@@ -67,6 +67,8 @@ namespace SilkySeal.Kerr.Rendering
         int _kernel;
         BlackHole _hole;
         KerrObserver _observer;
+        AccretionDisk _disk;
+        Vector4 _diskRange;
         RTHandle _skyHandle, _diskFluxHandle, _blackbodyHandle;
         Texture2D _blackbody;
 
@@ -78,7 +80,7 @@ namespace SilkySeal.Kerr.Rendering
         }
 
         /// <summary>Called by the feature each frame before EnqueuePass.</summary>
-        public void Setup(ComputeShader shader, BlackHole hole, KerrObserver observer)
+        public void Setup(ComputeShader shader, BlackHole hole, KerrObserver observer, AccretionDisk disk)
         {
             if (_shader != shader)
             {
@@ -87,6 +89,7 @@ namespace SilkySeal.Kerr.Rendering
             }
             _hole = hole;
             _observer = observer;
+            _disk = disk;
         }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -105,7 +108,8 @@ namespace SilkySeal.Kerr.Rendering
             var sky = renderGraph.ImportTexture(Wrap(ref _skyHandle, _hole.Sky != null ? _hole.Sky : CoreUtils.blackCubeTexture));
             if (_blackbody == null) _blackbody = DiskTables.BakeBlackbody();
             var blackbody = renderGraph.ImportTexture(Wrap(ref _blackbodyHandle, _blackbody));
-            var diskFlux = renderGraph.ImportTexture(Wrap(ref _diskFluxHandle, Texture2D.blackTexture));
+            var fluxTable = _disk != null ? _disk.FluxTable(out _diskRange) : Texture2D.blackTexture;
+            var diskFlux = renderGraph.ImportTexture(Wrap(ref _diskFluxHandle, fluxTable));
 
             using (var builder = renderGraph.AddComputePass<PassData>("Kerr Trace", out var data))
             {
@@ -147,10 +151,10 @@ namespace SilkySeal.Kerr.Rendering
 
             d.skyLuminance = 1;
             d.exposure = 1;
-            d.diskEnabled = 0;
-            d.diskShifts = 0;
-            d.diskOpacity = 1;
-            d.diskRange = Vector4.zero;
+            d.diskEnabled = _disk != null ? 1 : 0;
+            d.diskShifts = _disk != null && _disk.Shifts ? 1 : 0;
+            d.diskOpacity = _disk != null ? _disk.Opacity : 0;
+            d.diskRange = _diskRange;
         }
 
         static void Execute(PassData d, ComputeGraphContext ctx)

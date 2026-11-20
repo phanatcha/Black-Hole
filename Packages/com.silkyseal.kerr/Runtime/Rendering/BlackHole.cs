@@ -38,6 +38,9 @@ namespace SilkySeal.Kerr.Rendering
         public float SpeedOfLight => speedOfLight;
         public Cubemap Sky => sky;
 
+        /// <summary>For presets and tests; the inspector range applies.</summary>
+        internal void SetSpin(float value) => spin = Mathf.Clamp(value, 0, MaxSpin);
+
         // OnEnable/OnDisable always pair (destroy included), so the list stays correct even when domain
         // reload is off. Never clear it on load: with scene reload off, live holes would not re-register.
         void OnEnable() => s_Active.Add(this);
