@@ -92,10 +92,16 @@ namespace SilkySeal.Kerr
             if (f.Spin != s.Spin)
                 throw new ArgumentException($"Frame spin {f.Spin} differs from trace spin {s.Spin}.", nameof(s));
 
+            return Trace(f.Position, PixelRay(f, ndcX, ndcY, tanHalfFovY, aspect), s);
+        }
+
+        /// <summary>Past-directed null covector k_μ at the camera for one pixel, before any tracing.</summary>
+        public static Vector4d PixelRay(in CameraFrame f, double ndcX, double ndcY, double tanHalfFovY, double aspect)
+        {
             var dir = new Vector3d(ndcX * tanHalfFovY * aspect, ndcY * tanHalfFovY, 1).Normalized;
             var n = dir.X * f.Right + dir.Y * f.Up + dir.Z * f.Forward;
             // n − U is null and past-directed: following it goes back along the incoming light.
-            return Trace(f.Position, KerrSchild.Lower(n - f.U, f.Position, f.Spin), s);
+            return KerrSchild.Lower(n - f.U, f.Position, f.Spin);
         }
     }
 }
