@@ -81,5 +81,21 @@ namespace SilkySeal.Kerr
                 MaxAbsHamiltonian = maxAbsH,
             };
         }
+
+        /// <summary>
+        /// Traces the ray seen through one pixel. ndc is in [−1, 1] on both axes, +y up.
+        /// The pixel direction n is built in the camera's rest frame, so aberration from the boost is exact.
+        /// </summary>
+        /// <exception cref="ArgumentException">Frame and settings disagree on spin.</exception>
+        public static RayResult TracePixel(in CameraFrame f, double ndcX, double ndcY, double tanHalfFovY, double aspect, in TraceSettings s)
+        {
+            if (f.Spin != s.Spin)
+                throw new ArgumentException($"Frame spin {f.Spin} differs from trace spin {s.Spin}.", nameof(s));
+
+            var dir = new Vector3d(ndcX * tanHalfFovY * aspect, ndcY * tanHalfFovY, 1).Normalized;
+            var n = dir.X * f.Right + dir.Y * f.Up + dir.Z * f.Forward;
+            // n − U is null and past-directed: following it goes back along the incoming light.
+            return Trace(f.Position, KerrSchild.Lower(n - f.U, f.Position, f.Spin), s);
+        }
     }
 }
