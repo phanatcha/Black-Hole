@@ -28,6 +28,10 @@ namespace SilkySeal.Kerr.Rendering
         [Tooltip("Sky behind the hole. Empty uses a procedural grid that makes lensing easy to read.")]
         [SerializeField] Cubemap sky;
 
+        [Tooltip("Luminance in cd/m² of a sky texel of value 1. A moonless night sky averages about 0.001; " +
+                 "next to a lit disk any realistic sky is many stops too dim to see.")]
+        [SerializeField, Min(0)] float skyLuminance = 1;
+
         static readonly List<BlackHole> s_Active = new List<BlackHole>();
 
         /// <summary>Enabled black holes, in enable order. Read-only so only OnEnable/OnDisable change it.</summary>
@@ -37,6 +41,7 @@ namespace SilkySeal.Kerr.Rendering
         public float UnitsPerM => unitsPerM;
         public float SpeedOfLight => speedOfLight;
         public Cubemap Sky => sky;
+        public float SkyLuminance => skyLuminance;
 
         /// <summary>For presets and tests; the inspector range applies.</summary>
         internal void SetSpin(float value) => spin = Mathf.Clamp(value, 0, MaxSpin);

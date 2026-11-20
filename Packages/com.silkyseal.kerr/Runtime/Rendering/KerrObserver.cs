@@ -10,14 +10,39 @@ namespace SilkySeal.Kerr.Rendering
     [DisallowMultipleComponent]
     public sealed class KerrObserver : MonoBehaviour
     {
+        public enum ExposureMode
+        {
+            [Tooltip("Adapts like an eye to the brightest part of the view.")]
+            Automatic,
+            [Tooltip("Fixed EV100, as a camera set by hand.")]
+            Manual,
+        }
+
         // Below r₊ + 0.01 M the ZAMO frame is ill-conditioned; Phase 6 takes over inside with free fall.
         const double HorizonClearance = 0.01;
         // γ = 7 at 0.99c: strong aberration without the tetrad losing precision in float upload.
         const double MaxBeta = 0.99;
 
+        [Header("Exposure")]
+        [SerializeField] ExposureMode exposureMode = ExposureMode.Automatic;
+
+        [Tooltip("Manual exposure as EV100. Sunlit snow is about 16; a 4500 K disk surface about 32.")]
+        [SerializeField, Range(-10, 60)] float manualEV100 = 30;
+
+        [Tooltip("Stops added on top of either mode. Positive brightens.")]
+        [SerializeField, Range(-10, 10)] float exposureCompensation;
+
+        [Tooltip("How fast automatic exposure follows a change in brightness, per second.")]
+        [SerializeField, Min(0.01f)] float adaptationSpeed = 2;
+
         Vector3 _lastPosition;
         Vector3 _velocity;
         bool _hasLastPosition;
+
+        public ExposureMode Exposure => exposureMode;
+        public float ManualEV100 => manualEV100;
+        public float ExposureCompensation => exposureCompensation;
+        public float AdaptationSpeed => adaptationSpeed;
 
         void OnEnable() => _hasLastPosition = false;
 

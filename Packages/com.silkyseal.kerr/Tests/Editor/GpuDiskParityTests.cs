@@ -76,6 +76,8 @@ namespace SilkySeal.Kerr.Tests
             var sky = new Cubemap(1, TextureFormat.RGBA32, false);
             var blackbody = DiskTables.BakeBlackbody();
             var flux = DiskTables.BakeFlux(disk, out var range);
+            var meter = new GraphicsBuffer(GraphicsBuffer.Target.Structured, GridWidth * GridHeight, sizeof(float));
+            var state = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 2 * sizeof(float));
             try
             {
                 SetCamera(shader, frame);
@@ -87,7 +89,12 @@ namespace SilkySeal.Kerr.Tests
                 shader.SetTexture(kernel, "_DiskFlux", flux);
                 shader.SetTexture(kernel, "_Blackbody", blackbody);
                 shader.SetFloat("_SkyLuminance", 0);
-                shader.SetFloat("_Exposure", exposure);
+                // Manual exposure: 2^(compensation − EV100) / 1.2 = exposure.
+                shader.SetInt("_AutoExposure", 0);
+                shader.SetFloat("_ExposureCompensation", 0);
+                shader.SetFloat("_ManualEV100", -Mathf.Log(1.2f * exposure, 2));
+                shader.SetBuffer(kernel, "_MeterSamples", meter);
+                shader.SetBuffer(kernel, "_ExposureState", state);
                 shader.SetFloat("_UseSky", 0);
                 shader.SetInt("_Blackout", 0);
                 shader.SetMatrix("_HoleToWorld", Matrix4x4.identity);
@@ -105,6 +112,8 @@ namespace SilkySeal.Kerr.Tests
                 // Compute parameters persist on the asset; leave the disk off for the other kernels' tests.
                 shader.SetInt("_DiskEnabled", 0);
                 output.Release();
+                meter.Release();
+                state.Release();
                 UnityEngine.Object.DestroyImmediate(output);
                 UnityEngine.Object.DestroyImmediate(sky);
                 UnityEngine.Object.DestroyImmediate(blackbody);

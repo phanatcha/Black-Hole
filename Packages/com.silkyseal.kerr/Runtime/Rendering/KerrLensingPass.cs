@@ -21,7 +21,8 @@ namespace SilkySeal.Kerr.Rendering
         // A camera beyond MinFarRadius would see every ray "escape" at once; keep the sphere well outside it.
         const float FarRadiusPerCameraRadius = 2f;
         const int ThreadGroupSize = 8;
-        const string KernelName = "CSRender";
+        const string KernelName = "CSRender", MeasureKernelName = "CSMeasureExposure";
+        const int MeterStride = 4; // KERR_METER_STRIDE in Exposure.hlsl
 
         static readonly int s_CamPos = Shader.PropertyToID("_CamPos");
         static readonly int s_CamU = Shader.PropertyToID("_CamU");
@@ -41,7 +42,14 @@ namespace SilkySeal.Kerr.Rendering
         static readonly int s_Blackout = Shader.PropertyToID("_Blackout");
         static readonly int s_HoleToWorld = Shader.PropertyToID("_HoleToWorld");
         static readonly int s_SkyLuminance = Shader.PropertyToID("_SkyLuminance");
-        static readonly int s_Exposure = Shader.PropertyToID("_Exposure");
+        static readonly int s_AutoExposure = Shader.PropertyToID("_AutoExposure");
+        static readonly int s_ManualEV100 = Shader.PropertyToID("_ManualEV100");
+        static readonly int s_ExposureCompensation = Shader.PropertyToID("_ExposureCompensation");
+        static readonly int s_DeltaTime = Shader.PropertyToID("_DeltaTime");
+        static readonly int s_AdaptationSpeed = Shader.PropertyToID("_AdaptationSpeed");
+        static readonly int s_MeterCount = Shader.PropertyToID("_MeterCount");
+        static readonly int s_MeterSamples = Shader.PropertyToID("_MeterSamples");
+        static readonly int s_ExposureState = Shader.PropertyToID("_ExposureState");
         static readonly int s_DiskEnabled = Shader.PropertyToID("_DiskEnabled");
         static readonly int s_DiskShifts = Shader.PropertyToID("_DiskShifts");
         static readonly int s_DiskOpacity = Shader.PropertyToID("_DiskOpacity");
@@ -54,17 +62,21 @@ namespace SilkySeal.Kerr.Rendering
         sealed class PassData
         {
             public ComputeShader shader;
-            public int kernel;
+            public int kernel, measureKernel;
             public TextureHandle output, sky, diskFlux, blackbody;
+            public BufferHandle meter, exposureState;
             public Vector4 camPos, camU, camRight, camUp, camForward, diskRange;
             public Matrix4x4 holeToWorld;
-            public float spin, tanHalfFovY, aspect, farRadius, useSky, skyLuminance, exposure, diskOpacity;
-            public int blackout, diskEnabled, diskShifts;
+            public float spin, tanHalfFovY, aspect, farRadius, useSky, skyLuminance, diskOpacity;
+            public float manualEV100, exposureCompensation, deltaTime, adaptationSpeed;
+            public int blackout, diskEnabled, diskShifts, autoExposure, meterCount;
             public readonly int[] size = new int[2];
         }
 
         ComputeShader _shader;
-        int _kernel;
+        int _kernel, _measureKernel;
+        // shortcut: one adaptation state per renderer, so split-screen observers share it; key it by camera if that matters.
+        GraphicsBuffer _exposureState;
         BlackHole _hole;
         KerrObserver _observer;
         AccretionDisk _disk;
@@ -86,6 +98,7 @@ namespace SilkySeal.Kerr.Rendering
             {
                 _shader = shader;
                 _kernel = shader.FindKernel(KernelName);
+                _measureKernel = shader.FindKernel(MeasureKernelName);
             }
             _hole = hole;
             _observer = observer;
@@ -108,6 +121,14 @@ namespace SilkySeal.Kerr.Rendering
             var sky = renderGraph.ImportTexture(Wrap(ref _skyHandle, _hole.Sky != null ? _hole.Sky : CoreUtils.blackCubeTexture));
             if (_blackbody == null) _blackbody = DiskTables.BakeBlackbody();
             var blackbody = renderGraph.ImportTexture(Wrap(ref _blackbodyHandle, _blackbody));
+            if (_exposureState == null)
+            {
+                _exposureState = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 2 * sizeof(float)) { name = "Kerr Exposure" };
+                _exposureState.SetData(new Vector2[1]); // contents start undefined; (0, 0) means "snap on first meter"
+            }
+            var exposureState = renderGraph.ImportBuffer(_exposureState);
+            int meterCount = ((desc.width + MeterStride - 1) / MeterStride) * ((desc.height + MeterStride - 1) / MeterStride);
+            var meter = renderGraph.CreateBuffer(new BufferDesc(meterCount, sizeof(float)) { name = "Kerr Meter" });
             var fluxTable = _disk != null ? _disk.FluxTable(out _diskRange) : Texture2D.blackTexture;
             var diskFlux = renderGraph.ImportTexture(Wrap(ref _diskFluxHandle, fluxTable));
 
@@ -118,6 +139,11 @@ namespace SilkySeal.Kerr.Rendering
                 data.sky = sky;
                 data.blackbody = blackbody;
                 data.diskFlux = diskFlux;
+                data.meter = meter;
+                data.meterCount = meterCount;
+                data.exposureState = exposureState;
+                builder.UseBuffer(meter, AccessFlags.ReadWrite);
+                builder.UseBuffer(exposureState, AccessFlags.ReadWrite);
                 builder.UseTexture(output, AccessFlags.Write);
                 builder.UseTexture(sky, AccessFlags.Read);
                 builder.UseTexture(blackbody, AccessFlags.Read);
@@ -132,6 +158,7 @@ namespace SilkySeal.Kerr.Rendering
         {
             d.shader = _shader;
             d.kernel = _kernel;
+            d.measureKernel = _measureKernel;
             d.size[0] = width;
             d.size[1] = height;
             d.aspect = (float)width / height;
@@ -149,8 +176,12 @@ namespace SilkySeal.Kerr.Rendering
             d.camForward = ToFloat(f.Forward);
             d.farRadius = Mathf.Max(MinFarRadius, FarRadiusPerCameraRadius * (float)f.Position.Length);
 
-            d.skyLuminance = 1;
-            d.exposure = 1;
+            d.skyLuminance = _hole.SkyLuminance;
+            d.autoExposure = _observer.Exposure == KerrObserver.ExposureMode.Automatic ? 1 : 0;
+            d.manualEV100 = _observer.ManualEV100;
+            d.exposureCompensation = _observer.ExposureCompensation;
+            d.adaptationSpeed = _observer.AdaptationSpeed;
+            d.deltaTime = Time.unscaledDeltaTime; // adaptation is the eye's, not the simulation's
             d.diskEnabled = _disk != null ? 1 : 0;
             d.diskShifts = _disk != null && _disk.Shifts ? 1 : 0;
             d.diskOpacity = _disk != null ? _disk.Opacity : 0;
@@ -178,7 +209,11 @@ namespace SilkySeal.Kerr.Rendering
             cmd.SetComputeTextureParam(d.shader, d.kernel, s_Output, d.output);
             cmd.SetComputeTextureParam(d.shader, d.kernel, s_Sky, d.sky);
             cmd.SetComputeFloatParam(d.shader, s_SkyLuminance, d.skyLuminance);
-            cmd.SetComputeFloatParam(d.shader, s_Exposure, d.exposure);
+            cmd.SetComputeIntParam(d.shader, s_AutoExposure, d.autoExposure);
+            cmd.SetComputeFloatParam(d.shader, s_ManualEV100, d.manualEV100);
+            cmd.SetComputeFloatParam(d.shader, s_ExposureCompensation, d.exposureCompensation);
+            cmd.SetComputeBufferParam(d.shader, d.kernel, s_MeterSamples, d.meter);
+            cmd.SetComputeBufferParam(d.shader, d.kernel, s_ExposureState, d.exposureState);
             cmd.SetComputeIntParam(d.shader, s_DiskEnabled, d.diskEnabled);
             cmd.SetComputeIntParam(d.shader, s_DiskShifts, d.diskShifts);
             cmd.SetComputeFloatParam(d.shader, s_DiskOpacity, d.diskOpacity);
@@ -188,6 +223,15 @@ namespace SilkySeal.Kerr.Rendering
             cmd.SetComputeTextureParam(d.shader, d.kernel, s_Blackbody, d.blackbody);
             cmd.DispatchCompute(d.shader, d.kernel, (d.size[0] + ThreadGroupSize - 1) / ThreadGroupSize,
                                 (d.size[1] + ThreadGroupSize - 1) / ThreadGroupSize, 1);
+
+            if (d.autoExposure == 0) return;
+            // Meters this frame, exposes the next: a one-frame lag nobody sees at adaptation speeds of seconds.
+            cmd.SetComputeIntParam(d.shader, s_MeterCount, d.meterCount);
+            cmd.SetComputeFloatParam(d.shader, s_DeltaTime, d.deltaTime);
+            cmd.SetComputeFloatParam(d.shader, s_AdaptationSpeed, d.adaptationSpeed);
+            cmd.SetComputeBufferParam(d.shader, d.measureKernel, s_MeterSamples, d.meter);
+            cmd.SetComputeBufferParam(d.shader, d.measureKernel, s_ExposureState, d.exposureState);
+            cmd.DispatchCompute(d.shader, d.measureKernel, 1, 1, 1);
         }
 
         // Render graph only binds TextureHandles in compute passes, so plain textures go through an RTHandle,
@@ -209,6 +253,8 @@ namespace SilkySeal.Kerr.Rendering
         public void Dispose()
         {
             _skyHandle?.Release();
+            _exposureState?.Release();
+            _exposureState = null;
             _diskFluxHandle?.Release();
             _blackbodyHandle?.Release();
             _skyHandle = _diskFluxHandle = _blackbodyHandle = null;

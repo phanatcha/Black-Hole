@@ -1,9 +1,11 @@
 // Per-pixel Kerr geodesic tracing. One thread per pixel, 8×8 groups.
 #pragma kernel CSTraceDirections
 #pragma kernel CSRender
+#pragma kernel CSMeasureExposure
 
 #include "Geodesic.hlsl"
 #include "Sky.hlsl"
+#include "Exposure.hlsl"
 
 // Camera tetrad in Kerr-Schild components, float4(x, y, z, t), built in double on the CPU.
 float3 _CamPos;
@@ -29,7 +31,6 @@ float _UseSky;
 int _Blackout;
 float4x4 _HoleToWorld;
 float _SkyLuminance;   // cd/m² of a sky texel valued 1
-float _Exposure;       // scene luminance to output units
 
 // Past-directed null covector for the pixel centre; matches RayTracer.TracePixel.
 float4 PixelRay(uint2 id)
@@ -53,7 +54,8 @@ void CSTraceDirections(uint3 id : SV_DispatchThreadID)
 }
 
 // Lensed frame: disk light in front of the sky where the ray escapes, black where it falls in. One ray per pixel.
-// Output is exposed scene luminance, clamped below the RGBA16F maximum so bloom never sees infinity.
+// Output is scene luminance times last frame's exposure, clamped below the RGBA16F maximum so bloom never sees
+// infinity; each 4th pixel's unexposed luminance also goes to the meter.
 [numthreads(8, 8, 1)]
 void CSRender(uint3 id : SV_DispatchThreadID)
 {
@@ -73,5 +75,17 @@ void CSRender(uint3 id : SV_DispatchThreadID)
             color += transmittance * _SkyLuminance * sky;
         }
     }
-    _Output[id.xy] = float4(min(color * _Exposure, 65000.0), 1.0);
+    if (all(id.xy % KERR_METER_STRIDE == 0))
+    {
+        uint meterWidth = (_Size.x + KERR_METER_STRIDE - 1) / KERR_METER_STRIDE;
+        _MeterSamples[(id.y / KERR_METER_STRIDE) * meterWidth + id.x / KERR_METER_STRIDE] = KerrLuminance(color);
+    }
+    _Output[id.xy] = float4(min(color * KerrExposure(), 65000.0), 1.0);
+}
+
+// Eye adaptation from this frame's meter samples into the EV100 state the next frame is exposed with. One group.
+[numthreads(KERR_METER_THREADS, 1, 1)]
+void CSMeasureExposure(uint3 tid : SV_GroupThreadID)
+{
+    KerrMeasureExposure(tid.x);
 }
