@@ -52,18 +52,19 @@ void GeodesicStep(inout float3 x, inout float3 p, float pt, float a, inout float
 
     float3 ex = h * (CK_E1 * kx1 + CK_E3 * kx3 + CK_E4 * kx4 + CK_E5 * kx5 + CK_E6 * kx6);
     float3 ep = h * (CK_E1 * kp1 + CK_E3 * kp3 + CK_E4 * kp4 + CK_E5 * kp5 + CK_E6 * kp6);
+    // Non-negative by construction; abs() only tells the Metal compiler so for pow().
     float err = max(KerrErrorRatio(ex, x), KerrErrorRatio(ep, p)) / tolerance;
 
     if (err <= 1.0)
     {
         x += h * (CK_C1 * kx1 + CK_C3 * kx3 + CK_C4 * kx4 + CK_C6 * kx6);
         p += h * (CK_C1 * kp1 + CK_C3 * kp3 + CK_C4 * kp4 + CK_C6 * kp6);
-        h *= err > 0.0 ? min(5.0, 0.9 * pow(err, -0.2)) : 5.0;
+        h *= err > 0.0 ? min(5.0, 0.9 * pow(abs(err), -0.2)) : 5.0;
     }
     else
     {
         // A NaN error also lands here; MaxSteps then ends the ray.
-        h *= max(0.1, 0.9 * pow(err, -0.25));
+        h *= max(0.1, 0.9 * pow(abs(err), -0.25));
     }
 }
 

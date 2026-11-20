@@ -1,7 +1,9 @@
 // Per-pixel Kerr geodesic tracing. One thread per pixel, 8×8 groups.
 #pragma kernel CSTraceDirections
+#pragma kernel CSRender
 
 #include "Geodesic.hlsl"
+#include "Sky.hlsl"
 
 // Camera tetrad in Kerr-Schild components, float4(x, y, z, t), built in double on the CPU.
 float3 _CamPos;
@@ -18,6 +20,14 @@ int _MaxSteps;
 int2 _Size;
 
 RWStructuredBuffer<float4> _Directions;
+
+// CSRender only.
+RWTexture2D<float4> _Output;
+TextureCube _Sky;
+SamplerState sampler_Sky;
+float _UseSky;
+int _Blackout;
+float4x4 _HoleToWorld;
 
 // Past-directed null covector for the pixel centre; matches RayTracer.TracePixel.
 float4 PixelRay(uint2 id)
@@ -37,4 +47,25 @@ void CSTraceDirections(uint3 id : SV_DispatchThreadID)
     int status;
     TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status);
     _Directions[id.y * _Size.x + id.x] = float4(skyDir, status);
+}
+
+// Lensed frame: sky where the ray escapes, black where it falls in. One ray per pixel.
+[numthreads(8, 8, 1)]
+void CSRender(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size)) return;
+    float3 color = 0.0;
+    if (_Blackout == 0)
+    {
+        float3 skyDir;
+        int status;
+        TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status);
+        if (status == KERR_STATUS_ESCAPED)
+        {
+            // Kerr-Schild (x, y, z) is hole-local (x, z, y); the matrix may carry scale, so renormalize.
+            float3 world = normalize(mul((float3x3)_HoleToWorld, skyDir.xzy));
+            color = _UseSky > 0.5 ? _Sky.SampleLevel(sampler_Sky, world, 0).rgb : KerrGridSky(world);
+        }
+    }
+    _Output[id.xy] = float4(color, 1.0);
 }
