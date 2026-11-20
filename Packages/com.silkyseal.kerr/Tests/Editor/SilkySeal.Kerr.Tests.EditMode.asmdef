@@ -4,6 +4,9 @@
     "references": [
         "SilkySeal.Kerr.Core",
         "SilkySeal.Kerr.Rendering",
+        "SilkySeal.Kerr.Controls",
+        "Unity.InputSystem",
+        "Unity.InputSystem.TestFramework",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
