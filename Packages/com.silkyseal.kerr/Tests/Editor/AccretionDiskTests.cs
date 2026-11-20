@@ -48,6 +48,14 @@ namespace SilkySeal.Kerr.Tests
         }
 
         [Test]
+        public void DestroyingTheDisk_InEditMode_ReleasesItsTable()
+        {
+            var table = _disk.FluxTable(out _);
+            Object.DestroyImmediate(_disk);
+            Assert.IsTrue(table == null, "the flux table outlived its disk");
+        }
+
+        [Test]
         public void InterstellarPreset_IsGargantua()
         {
             _disk.ApplyInterstellarPreset();

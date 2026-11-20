@@ -8,6 +8,8 @@ namespace SilkySeal.Kerr.Rendering
     /// pass. Gas orbits with the hole's spin from the ISCO outwards; each ring glows as a blackbody at its Page–Thorne
     /// temperature, seen through the gravitational and Doppler shift unless <see cref="Shifts"/> is off.
     /// </summary>
+    // ExecuteAlways so OnDisable runs in edit mode too and frees the table on destroy and domain reload.
+    [ExecuteAlways]
     [RequireComponent(typeof(BlackHole))]
     [DisallowMultipleComponent]
     public sealed class AccretionDisk : MonoBehaviour
