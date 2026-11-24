@@ -32,12 +32,18 @@ float KerrDiskFlux(float r)
     return lerp(_DiskFlux.Load(int3(i0, 0, 0)), _DiskFlux.Load(int3(i0 + 1, 0, 0)), f);
 }
 
-// Linear sRGB in cd/m² of a blackbody surface.
-float3 KerrBlackbody(float kelvin)
+// (linear sRGB / Y, log2 Y in cd/m²) of a blackbody surface.
+float4 KerrBlackbodyTexel(float kelvin)
 {
     int i0; float f;
     KerrTableTexels((log(kelvin) - _BlackbodyRange.x) * _BlackbodyRange.y, i0, f);
-    float4 c = lerp(_Blackbody.Load(int3(i0, 0, 0)), _Blackbody.Load(int3(i0 + 1, 0, 0)), f);
+    return lerp(_Blackbody.Load(int3(i0, 0, 0)), _Blackbody.Load(int3(i0 + 1, 0, 0)), f);
+}
+
+// Linear sRGB in cd/m² of a blackbody surface.
+float3 KerrBlackbody(float kelvin)
+{
+    float4 c = KerrBlackbodyTexel(kelvin);
     return c.rgb * exp2(c.a);
 }
 

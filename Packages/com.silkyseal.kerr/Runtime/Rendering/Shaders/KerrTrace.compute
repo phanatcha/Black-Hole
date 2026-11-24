@@ -1,10 +1,13 @@
 // Per-pixel Kerr geodesic tracing. One thread per pixel, 8×8 groups.
 #pragma kernel CSTraceDirections
-#pragma kernel CSRender
+#pragma kernel CSTrace
+#pragma kernel CSShade
 #pragma kernel CSMeasureExposure
 
 #include "Geodesic.hlsl"
 #include "Sky.hlsl"
+#include "Stars.hlsl"
+#include "Spectrum.hlsl"
 #include "Exposure.hlsl"
 
 // Camera tetrad in Kerr-Schild components, float4(x, y, z, t), built in double on the CPU.
@@ -23,13 +26,17 @@ int2 _Size;
 
 RWStructuredBuffer<float4> _Directions;
 
-// CSRender only.
+// CSTrace to CSShade, two float4 per pixel: (world sky direction, g) then (disk radiance, transmittance).
+// g is the sky's frequency shift, observed over emitted; 0 where the ray did not escape.
+RWStructuredBuffer<float4> _Trace;
+int _Blackout;
+float4x4 _HoleToWorld;
+
+// CSShade only.
 RWTexture2D<float4> _Output;
 TextureCube _Sky;
 SamplerState sampler_Sky;
 float _UseSky;
-int _Blackout;
-float4x4 _HoleToWorld;
 float _SkyLuminance;   // cd/m² of a sky texel valued 1
 
 // Past-directed null covector for the pixel centre; matches RayTracer.TracePixel.
@@ -53,27 +60,76 @@ void CSTraceDirections(uint3 id : SV_DispatchThreadID)
     _Directions[id.y * _Size.x + id.x] = float4(skyDir, status);
 }
 
-// Lensed frame: disk light in front of the sky where the ray escapes, black where it falls in. One ray per pixel.
-// Output is scene luminance times last frame's exposure, clamped below the RGBA16F maximum so bloom never sees
-// infinity; each 4th pixel's unexposed luminance also goes to the meter.
+// The geodesic part of a frame: one ray per pixel, disk light composited along it, the sky direction it leaves by.
 [numthreads(8, 8, 1)]
-void CSRender(uint3 id : SV_DispatchThreadID)
+void CSTrace(uint3 id : SV_DispatchThreadID)
 {
     if (any(id.xy >= (uint2)_Size)) return;
-    float3 color = 0.0;
+    float3 skyDir = 0.0, radiance = 0.0;
+    float transmittance = 0.0, g = 0.0;
     if (_Blackout == 0)
     {
-        float3 skyDir;
-        float transmittance;
         int status;
-        TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status, color, transmittance);
+        float4 k = PixelRay(id.xy);
+        TraceRay(_CamPos, k, _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status, radiance, transmittance);
         if (status == KERR_STATUS_ESCAPED)
         {
+            // k·u = 1 at the camera and k_t is conserved, so a source at rest far away sees the ray shifted by 1 / k_t.
+            g = 1.0 / k.w;
             // Kerr-Schild (x, y, z) is hole-local (x, z, y); the matrix may carry scale, so renormalize.
-            float3 world = normalize(mul((float3x3)_HoleToWorld, skyDir.xzy));
-            float3 sky = _UseSky > 0.5 ? _Sky.SampleLevel(sampler_Sky, world, 0).rgb : KerrGridSky(world);
-            color += transmittance * _SkyLuminance * sky;
+            skyDir = normalize(mul((float3x3)_HoleToWorld, skyDir.xzy));
         }
+        else skyDir = 0.0;
+    }
+    uint i = id.y * _Size.x + id.x;
+    _Trace[2 * i] = float4(skyDir, g);
+    _Trace[2 * i + 1] = float4(radiance, transmittance);
+}
+
+// Sky direction through pixel p, or 0 where its ray did not escape or p is off screen.
+float3 KerrSkyDirection(int2 p)
+{
+    if (any(p < 0) || any(p >= _Size)) return 0.0;
+    float4 s = _Trace[2 * (p.y * _Size.x + p.x)];
+    return s.w > 0.0 ? s.xyz : 0.0;
+}
+
+// Mirror of Footprint.Step: the smaller one-sided difference, tangent to the centre direction.
+bool KerrFootprintStep(float3 centre, float3 back, float3 forward, out float3 step)
+{
+    bool hasBack = dot(back, back) > 0.0, hasForward = dot(forward, forward) > 0.0;
+    float3 b = centre - back, f = forward - centre;
+    step = hasBack && hasForward ? (dot(f, f) <= dot(b, b) ? f : b) : (hasForward ? f : b);
+    step -= centre * dot(centre, step);
+    return hasBack || hasForward;
+}
+
+// Mirror of Footprint.Estimate: change of sky direction per pixel step in x and y.
+void KerrFootprint(int2 p, float3 centre, out float3 jx, out float3 jy)
+{
+    bool hasX = KerrFootprintStep(centre, KerrSkyDirection(p - int2(1, 0)), KerrSkyDirection(p + int2(1, 0)), jx);
+    bool hasY = KerrFootprintStep(centre, KerrSkyDirection(p - int2(0, 1)), KerrSkyDirection(p + int2(0, 1)), jy);
+    float pixel = 2.0 * _TanHalfFovY / _Size.y;
+    if (!hasX) jx = normalize(hasY ? cross(jy, centre) : cross(centre, abs(centre.y) < 0.9 ? float3(0, 1, 0) : float3(1, 0, 0))) * pixel;
+    if (!hasY) jy = normalize(cross(centre, jx)) * pixel;
+}
+
+// Lensed frame from the trace: disk light in front of the sky and stars, both filtered over the pixel's footprint and
+// shifted by the ray's g. Output is scene luminance times last frame's exposure, clamped below the RGBA16F maximum so
+// bloom never sees infinity; each 4th pixel's unexposed luminance also goes to the meter.
+[numthreads(8, 8, 1)]
+void CSShade(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size)) return;
+    uint i = id.y * _Size.x + id.x;
+    float4 sky = _Trace[2 * i], disk = _Trace[2 * i + 1];
+    float3 color = disk.rgb;
+    if (sky.w > 0.0)
+    {
+        float3 jx, jy;
+        KerrFootprint(int2(id.xy), sky.xyz, jx, jy);
+        float3 background = _UseSky > 0.5 ? _Sky.SampleGrad(sampler_Sky, sky.xyz, jx, jy).rgb : KerrGridSky(sky.xyz);
+        color += disk.a * (_SkyLuminance * KerrShiftRgb(background, sky.w) + KerrStarRadiance(sky.xyz, jx, jy, sky.w));
     }
     if (all(id.xy % KERR_METER_STRIDE == 0))
     {

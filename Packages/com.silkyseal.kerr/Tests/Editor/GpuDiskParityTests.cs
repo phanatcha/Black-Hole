@@ -1,11 +1,9 @@
 using System;
-using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using SilkySeal.Kerr.Rendering;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Rendering;
 using static SilkySeal.Kerr.Tests.GpuParityTests;
 
 namespace SilkySeal.Kerr.Tests
@@ -68,16 +66,13 @@ namespace SilkySeal.Kerr.Tests
             return results;
         }
 
+        // CSTrace into a trace buffer, then CSShade with no sky and no stars.
         static Vector4[] RunGpu(ComputeShader shader, CameraFrame frame, ThinDisk disk, double opacity, float exposure)
         {
-            int kernel = shader.FindKernel("CSRender");
-            var output = new RenderTexture(GridWidth, GridHeight, 0, RenderTextureFormat.ARGBFloat) { enableRandomWrite = true };
-            output.Create();
-            var sky = new Cubemap(1, TextureFormat.RGBA32, false);
+            int kernel = shader.FindKernel("CSTrace");
+            var trace = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2 * GridWidth * GridHeight, 4 * sizeof(float));
             var blackbody = DiskTables.BakeBlackbody();
             var flux = DiskTables.BakeFlux(disk, out var range);
-            var meter = new GraphicsBuffer(GraphicsBuffer.Target.Structured, GridWidth * GridHeight, sizeof(float));
-            var state = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 2 * sizeof(float));
             try
             {
                 SetCamera(shader, frame);
@@ -88,34 +83,20 @@ namespace SilkySeal.Kerr.Tests
                 shader.SetVector("_BlackbodyRange", DiskTables.BlackbodyRange);
                 shader.SetTexture(kernel, "_DiskFlux", flux);
                 shader.SetTexture(kernel, "_Blackbody", blackbody);
-                shader.SetFloat("_SkyLuminance", 0);
-                // Manual exposure: 2^(compensation − EV100) / 1.2 = exposure.
-                shader.SetInt("_AutoExposure", 0);
-                shader.SetFloat("_ExposureCompensation", 0);
-                shader.SetFloat("_ManualEV100", -Mathf.Log(1.2f * exposure, 2));
-                shader.SetBuffer(kernel, "_MeterSamples", meter);
-                shader.SetBuffer(kernel, "_ExposureState", state);
-                shader.SetFloat("_UseSky", 0);
                 shader.SetInt("_Blackout", 0);
                 shader.SetMatrix("_HoleToWorld", Matrix4x4.identity);
-                shader.SetTexture(kernel, "_Sky", sky);
-                shader.SetTexture(kernel, "_Output", output);
+                shader.SetBuffer(kernel, "_Trace", trace);
                 Dispatch(shader, kernel);
 
-                var request = AsyncGPUReadback.Request(output);
-                request.WaitForCompletion();
-                Assert.IsFalse(request.hasError, "GPU readback failed");
-                return request.GetData<Vector4>().ToArray();
+                var traced = new Vector4[2 * GridWidth * GridHeight];
+                trace.GetData(traced);
+                return GpuSkyParityTests.Shade(shader, traced, GridWidth, GridHeight, VerticalFov / GridHeight, null, null, 0, exposure);
             }
             finally
             {
                 // Compute parameters persist on the asset; leave the disk off for the other kernels' tests.
                 shader.SetInt("_DiskEnabled", 0);
-                output.Release();
-                meter.Release();
-                state.Release();
-                UnityEngine.Object.DestroyImmediate(output);
-                UnityEngine.Object.DestroyImmediate(sky);
+                trace.Release();
                 UnityEngine.Object.DestroyImmediate(blackbody);
                 UnityEngine.Object.DestroyImmediate(flux);
             }

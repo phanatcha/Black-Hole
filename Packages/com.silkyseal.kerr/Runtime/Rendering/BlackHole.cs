@@ -28,6 +28,10 @@ namespace SilkySeal.Kerr.Rendering
         [Tooltip("Sky behind the hole. Empty uses a procedural grid that makes lensing easy to read.")]
         [SerializeField] Cubemap sky;
 
+        [Tooltip("Star catalogue packed by StarCatalogue.Pack; the package ships Hipparcos. Stars keep their true " +
+                 "brightness, so they show only when nothing much brighter is in view. Empty: no stars.")]
+        [SerializeField] TextAsset stars;
+
         [Tooltip("Luminance in cd/m² of a sky texel of value 1. A moonless night sky averages about 0.001; " +
                  "next to a lit disk any realistic sky is many stops too dim to see.")]
         [SerializeField, Min(0)] float skyLuminance = 1;
@@ -41,6 +45,7 @@ namespace SilkySeal.Kerr.Rendering
         public float UnitsPerM => unitsPerM;
         public float SpeedOfLight => speedOfLight;
         public Cubemap Sky => sky;
+        public TextAsset Stars => stars;
         public float SkyLuminance => skyLuminance;
 
         /// <summary>For presets and tests; the inspector range applies.</summary>
