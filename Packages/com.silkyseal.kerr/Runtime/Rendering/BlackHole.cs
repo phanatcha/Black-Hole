@@ -32,8 +32,9 @@ namespace SilkySeal.Kerr.Rendering
                  "brightness, so they show only when nothing much brighter is in view. Empty: no stars.")]
         [SerializeField] TextAsset stars;
 
-        [Tooltip("Luminance in cd/m² of a sky texel of value 1. A moonless night sky averages about 0.001; " +
-                 "next to a lit disk any realistic sky is many stops too dim to see.")]
+        [Tooltip("Luminance in cd/m² of a sky texel of value 1. The packaged MilkyWay.exr takes 0.011, which puts " +
+                 "the galactic poles at about 23.5 V mag/arcsec². Next to a lit disk any realistic sky is many stops " +
+                 "too dim to see.")]
         [SerializeField, Min(0)] float skyLuminance = 1;
 
         static readonly List<BlackHole> s_Active = new List<BlackHole>();

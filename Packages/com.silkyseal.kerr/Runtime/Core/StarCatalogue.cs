@@ -36,14 +36,14 @@ namespace SilkySeal.Kerr
         public static double Kelvin(double bMinusV) => 4600 * (1 / (0.92 * bMinusV + 1.7) + 1 / (0.92 * bMinusV + 0.62));
 
         /// <summary>
-        /// ICRS right ascension and declination as a unit vector: celestial north is +Y, RA 0 is +X, RA 90° is +Z.
-        /// Swapping ICRS y and z, as the black hole does with Kerr–Schild axes, puts right-handed ICRS into Unity's
-        /// left-handed world without mirroring the sky.
+        /// ICRS right ascension and declination as a unit vector: celestial north is +Y, RA 0 is +Z, RA 90° is −X.
+        /// That is where Unity's latitude–longitude cube import puts an RA-centred sky panorama, and the odd axis swap
+        /// takes right-handed ICRS into Unity's left-handed world without mirroring the sky.
         /// </summary>
         public static Vector3d Direction(double raDegrees, double decDegrees)
         {
             double ra = raDegrees * Math.PI / 180, dec = decDegrees * Math.PI / 180;
-            return new Vector3d(Math.Cos(dec) * Math.Cos(ra), Math.Sin(dec), Math.Cos(dec) * Math.Sin(ra));
+            return new Vector3d(-Math.Cos(dec) * Math.Sin(ra), Math.Sin(dec), Math.Cos(dec) * Math.Cos(ra));
         }
 
         /// <summary>

@@ -17,6 +17,7 @@ namespace SilkySeal.Kerr.Tests
     {
         const int Width = 64, Height = 48, StarMapSize = 64;
         const double ShadowRadius = 6;
+        const string MilkyWayPath = "Packages/com.silkyseal.kerr/Runtime/Data/MilkyWay.exr";
         // Faces +X and +Y meet a few degrees right of the image centre, so the gather crosses a cube edge.
         static readonly Vector3d Forward = new Vector3d(1, 0.9, 0.2).Normalized;
 
@@ -97,6 +98,25 @@ namespace SilkySeal.Kerr.Tests
             {
                 UnityEngine.Object.DestroyImmediate(sky);
             }
+        }
+
+        [Test]
+        public void MilkyWay_LinesUpWithTheCatalogue()
+        {
+            // The image is centred on RA 0; Unity's latitude–longitude cube import faces its centre along +Z.
+            var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(ShaderPath);
+            var sky = AssetDatabase.LoadAssetAtPath<Cubemap>(MilkyWayPath);
+            Assert.IsNotNull(sky, $"Milky Way cube missing at {MilkyWayPath}");
+            var bulge = StarCatalogue.Direction(266.4, -28.9);
+            var northGalacticPole = StarCatalogue.Direction(192.86, 27.13);
+
+            // Spaced by a ray that did not escape, so each footprint falls back to the 3° pixel and blurs the dust lanes.
+            var gpu = Shade(shader, Trace(new[] { bulge, default, northGalacticPole }, _ => 1), 3, 1, 0.05, sky, null, 1, 1);
+
+            double centre = Luminance(new Vector3d(gpu[0].x, gpu[0].y, gpu[0].z));
+            double pole = Luminance(new Vector3d(gpu[2].x, gpu[2].y, gpu[2].z));
+            Debug.Log($"[Milky Way] bulge {centre:G3}, north galactic pole {pole:G3}");
+            Assert.Greater(centre, 10 * pole);
         }
 
         /// <summary>

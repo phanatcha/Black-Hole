@@ -500,8 +500,9 @@ MonoBehaviour:
   spin: 0.6
   unitsPerM: 1
   speedOfLight: 30
-  sky: {fileID: 0}
-  skyLuminance: 1
+  sky: {fileID: 8900000, guid: ea5ac453e5ff343cd9e5d6f0d850c4b7, type: 3}
+  stars: {fileID: 4900000, guid: bb9910094602c4a9b94c77cb6e9bffbe, type: 3}
+  skyLuminance: 0.011
 --- !u!4 &1914402829
 Transform:
   m_ObjectHideFlags: 0

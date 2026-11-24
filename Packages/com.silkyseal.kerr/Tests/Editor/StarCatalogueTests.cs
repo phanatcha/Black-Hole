@@ -22,8 +22,8 @@ namespace SilkySeal.Kerr.Tests
         [Test]
         public void Direction_MapsIcrsOntoUnityAxes()
         {
-            AssertClose(new Vector3d(1, 0, 0), StarCatalogue.Direction(0, 0));
-            AssertClose(new Vector3d(0, 0, 1), StarCatalogue.Direction(90, 0));
+            AssertClose(new Vector3d(0, 0, 1), StarCatalogue.Direction(0, 0));
+            AssertClose(new Vector3d(-1, 0, 0), StarCatalogue.Direction(90, 0));
             AssertClose(new Vector3d(0, 1, 0), StarCatalogue.Direction(123, 90));
         }
 
