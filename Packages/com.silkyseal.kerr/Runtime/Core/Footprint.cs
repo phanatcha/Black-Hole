@@ -21,13 +21,17 @@ namespace SilkySeal.Kerr
             if (!hasY) jy = Vector3d.Cross(centre, jx).Normalized * pixelAngle;
         }
 
-        // The smaller one-sided difference, so a neighbour across a lensing fold or the shadow edge cannot blow the
-        // footprint up; projected onto the plane tangent at the centre.
+        // The central difference where the two one-sided steps differ by at most two thirds of their mean: it is
+        // second-order accurate and averages out the tracer's noise. On a fold both neighbours map to the same side, and
+        // across the shadow edge one jumps far away; there the smaller one-sided step keeps the footprint honest.
+        // Projected onto the plane tangent at the centre.
         static bool Step(Vector3d centre, Vector3d back, Vector3d forward, out Vector3d step)
         {
             bool hasBack = back.Length > 0, hasForward = forward.Length > 0;
-            Vector3d b = centre - back, f = forward - centre;
-            step = hasBack && hasForward ? (Vector3d.Dot(f, f) <= Vector3d.Dot(b, b) ? f : b) : hasForward ? f : b;
+            Vector3d b = centre - back, f = forward - centre, sum = f + b, gap = f - b;
+            step = !hasBack ? f : !hasForward ? b
+                 : 9 * Vector3d.Dot(gap, gap) <= Vector3d.Dot(sum, sum) ? sum * 0.5
+                 : Vector3d.Dot(f, f) <= Vector3d.Dot(b, b) ? f : b;
             step -= centre * Vector3d.Dot(centre, step);
             return hasBack || hasForward;
         }

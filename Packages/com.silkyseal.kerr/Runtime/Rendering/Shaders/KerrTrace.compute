@@ -94,12 +94,14 @@ float3 KerrSkyDirection(int2 p)
     return s.w > 0.0 ? s.xyz : 0.0;
 }
 
-// Mirror of Footprint.Step: the smaller one-sided difference, tangent to the centre direction.
+// Mirror of Footprint.Step: the central difference where the one-sided steps differ by at most two thirds of their
+// mean, else the smaller one-sided step; tangent to the centre direction.
 bool KerrFootprintStep(float3 centre, float3 back, float3 forward, out float3 step)
 {
     bool hasBack = dot(back, back) > 0.0, hasForward = dot(forward, forward) > 0.0;
-    float3 b = centre - back, f = forward - centre;
-    step = hasBack && hasForward ? (dot(f, f) <= dot(b, b) ? f : b) : (hasForward ? f : b);
+    float3 b = centre - back, f = forward - centre, sum = f + b, gap = f - b;
+    step = !hasBack ? f : (!hasForward ? b
+         : (9.0 * dot(gap, gap) <= dot(sum, sum) ? 0.5 * sum : (dot(f, f) <= dot(b, b) ? f : b)));
     step -= centre * dot(centre, step);
     return hasBack || hasForward;
 }
