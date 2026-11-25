@@ -2,7 +2,7 @@ using System;
 
 namespace SilkySeal.Kerr
 {
-    /// <summary>How a backward-traced light ray ended. Absorbed: an <see cref="IEquatorObserver"/> stopped it.</summary>
+    /// <summary>How a backward-traced light ray ended. Absorbed: an <see cref="IRayObserver"/> stopped it.</summary>
     public enum RayStatus { Escaped, Captured, MaxSteps, Absorbed }
 
     /// <summary>Integration limits for one ray.</summary>
@@ -37,16 +37,23 @@ namespace SilkySeal.Kerr
     }
 
     /// <summary>
-    /// Sees each pass of a ray through the equatorial plane, where a thin disk lives. A struct so the tracer's loop
-    /// stays allocation-free and the call inlines.
+    /// Sees a ray as it is traced: each pass through the equatorial plane, where a thin disk lives, and each step, for
+    /// matter that fills space. A struct so the tracer's loop stays allocation-free and the calls inline.
     /// </summary>
-    public interface IEquatorObserver
+    public interface IRayObserver
     {
         /// <summary>
         /// x: crossing point (z ≈ 0, interpolated between steps). kt, kPhi: the ray's conserved k_t and
         /// k_φ = x k_y − y k_x. Return false to stop the ray as absorbed.
         /// </summary>
         bool OnEquatorCrossing(Vector3d x, double kt, double kPhi);
+
+        /// <summary>
+        /// Called at the camera with h = 0, then after every accepted step with the new position and covector p_μ; h is
+        /// that step's length in the affine parameter. nextStep is the length the integrator tries next and may be
+        /// lowered. Return false to stop the ray as absorbed.
+        /// </summary>
+        bool OnStep(Vector3d x, Vector4d p, double h, ref double nextStep);
     }
 
     /// <summary>Traces past-directed null geodesics from the camera back to their source.</summary>
@@ -72,9 +79,9 @@ namespace SilkySeal.Kerr
             return Trace(x0, k0Lower, s, ref none);
         }
 
-        /// <summary>As <see cref="Trace(Vector3d, Vector4d, in TraceSettings)"/>, reporting equator crossings to observer.</summary>
+        /// <summary>As <see cref="Trace(Vector3d, Vector4d, in TraceSettings)"/>, reporting the ray to observer.</summary>
         public static RayResult Trace<T>(Vector3d x0, Vector4d k0Lower, in TraceSettings s, ref T observer)
-            where T : struct, IEquatorObserver
+            where T : struct, IRayObserver
         {
             double a = s.Spin, pt = k0Lower.T;
             double captureRadius = KerrSchild.HorizonRadius(a) + HorizonMargin;
@@ -85,6 +92,7 @@ namespace SilkySeal.Kerr
 
             var status = RayStatus.MaxSteps;
             int steps = 0, crossings = 0;
+            if (!observer.OnStep(x, k0Lower, 0, ref h)) { status = RayStatus.Absorbed; steps = s.MaxSteps; }
             for (; steps < s.MaxSteps; steps++)
             {
                 if (KerrSchild.Radius(x, a) <= captureRadius) { status = RayStatus.Captured; break; }
@@ -94,11 +102,13 @@ namespace SilkySeal.Kerr
                 double stepSize = h;
                 if (!GeodesicIntegrator.Step(ref x, ref p, pt, a, ref h, s.Tolerance)) continue;
                 maxAbsH = Math.Max(maxAbsH, Math.Abs(KerrSchild.Hamiltonian(x, new Vector4d(pt, p), a)));
-                if (before.Z * x.Z >= 0) continue;
-
-                crossings++;
-                var crossing = EquatorCrossing(before, pBefore, x, p, pt, a, stepSize);
-                if (!observer.OnEquatorCrossing(crossing, pt, x.X * p.Y - x.Y * p.X)) { status = RayStatus.Absorbed; break; }
+                if (before.Z * x.Z < 0)
+                {
+                    crossings++;
+                    var crossing = EquatorCrossing(before, pBefore, x, p, pt, a, stepSize);
+                    if (!observer.OnEquatorCrossing(crossing, pt, x.X * p.Y - x.Y * p.X)) { status = RayStatus.Absorbed; break; }
+                }
+                if (!observer.OnStep(x, new Vector4d(pt, p), stepSize, ref h)) { status = RayStatus.Absorbed; break; }
             }
 
             var momentum = new Vector4d(pt, p);
@@ -136,9 +146,10 @@ namespace SilkySeal.Kerr
             return x0 * (2 * s3 - 3 * s2 + 1) + v0 * (s3 - 2 * s2 + t) + x1 * (3 * s2 - 2 * s3) + v1 * (s3 - s2);
         }
 
-        struct NoObserver : IEquatorObserver
+        struct NoObserver : IRayObserver
         {
             public bool OnEquatorCrossing(Vector3d x, double kt, double kPhi) => true;
+            public bool OnStep(Vector3d x, Vector4d p, double h, ref double nextStep) => true;
         }
 
         /// <summary>

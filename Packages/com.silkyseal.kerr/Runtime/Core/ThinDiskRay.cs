@@ -6,7 +6,7 @@ namespace SilkySeal.Kerr
     /// Shades one ray against a <see cref="ThinDisk"/>: front to back over every pass through the disk, so lensed
     /// images of the far side and the photon-ring copies all add in. Trace with the disk's own spin.
     /// </summary>
-    public struct ThinDiskRay : IEquatorObserver
+    public struct ThinDiskRay : IRayObserver
     {
         /// <summary>Below this the remaining sky and disk behind cannot show; the ray stops as absorbed.</summary>
         public const double OpaqueTransmittance = 1e-3;
@@ -46,5 +46,7 @@ namespace SilkySeal.Kerr
             if (double.IsNaN(FirstHitRadius)) FirstHitRadius = r;
             return Transmittance >= OpaqueTransmittance;
         }
+
+        public bool OnStep(Vector3d x, Vector4d p, double h, ref double nextStep) => true;
     }
 }
