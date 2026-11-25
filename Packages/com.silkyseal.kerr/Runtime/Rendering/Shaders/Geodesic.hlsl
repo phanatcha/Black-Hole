@@ -3,6 +3,7 @@
 
 #include "KerrSchild.hlsl"
 #include "Disk.hlsl"
+#include "Gas.hlsl"
 
 // Float32 mirror of Runtime/Core/GeodesicIntegrator.cs and RayTracer.Trace. Keep the two in step:
 // GpuParityTests compares them ray by ray.
@@ -38,8 +39,8 @@ float KerrErrorRatio(float3 err, float3 y)
     return max(e.x, max(e.y, e.z));
 }
 
-// One adaptive Cash–Karp attempt; advances (x, p) only when the error is within tolerance.
-void GeodesicStep(inout float3 x, inout float3 p, float pt, float a, inout float h, float tolerance)
+// One adaptive Cash–Karp attempt; advances (x, p) and returns true only when the error is within tolerance.
+bool GeodesicStep(inout float3 x, inout float3 p, float pt, float a, inout float h, float tolerance)
 {
     float3 kx1, kp1, kx2, kp2, kx3, kp3, kx4, kp4, kx5, kp5, kx6, kp6;
     KerrDerivatives(x, p, pt, a, kx1, kp1);
@@ -62,12 +63,11 @@ void GeodesicStep(inout float3 x, inout float3 p, float pt, float a, inout float
         x += h * (CK_C1 * kx1 + CK_C3 * kx3 + CK_C4 * kx4 + CK_C6 * kx6);
         p += h * (CK_C1 * kp1 + CK_C3 * kp3 + CK_C4 * kp4 + CK_C6 * kp6);
         h *= err > 0.0 ? min(5.0, 0.9 * pow(abs(err), -0.2)) : 5.0;
+        return true;
     }
-    else
-    {
-        // A NaN error also lands here; MaxSteps then ends the ray.
-        h *= max(0.1, 0.9 * pow(abs(err), -0.25));
-    }
+    // A NaN error also lands here; MaxSteps then ends the ray.
+    h *= max(0.1, 0.9 * pow(abs(err), -0.25));
+    return false;
 }
 
 // Where one accepted step of length h meets z = 0: root of the cubic Hermite through both ends and their velocities.
@@ -91,9 +91,10 @@ float3 EquatorCrossing(float3 x0, float3 p0, float3 x1, float3 p1, float pt, flo
 }
 
 // Traces a past-directed null covector kLower = (p_x, p_y, p_z, p_t) from x0, shading the disk on the way when
-// _DiskEnabled. radiance is the disk light collected, transmittance what still shows of the sky behind it.
+// _DiskEnabled and the hot gas when _GasView is on. radiance is the disk and eye-view gas light collected,
+// transmittance what still shows of the sky behind it; gas carries the 230 GHz Stokes parameters.
 // Cost: at most maxSteps × 6 gradient evaluations.
-void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRadius, int maxSteps,
+void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRadius, int maxSteps, inout KerrGasRay gas,
               out float3 skyDir, out int status, out float3 radiance, out float transmittance)
 {
     radiance = 0.0;
@@ -105,6 +106,7 @@ void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRa
     float h = KERR_INITIAL_STEP_PER_RADIUS * KerrRadius(x0, spin);
 
     status = KERR_STATUS_MAX_STEPS;
+    if (_GasView != KERR_GAS_OFF) KerrGasStep(gas, x, kLower, spin, 0.0, h, transmittance);
     [loop]
     for (int i = 0; i < maxSteps; i++)
     {
@@ -112,17 +114,20 @@ void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRa
         if (length(x) >= farRadius) { status = KERR_STATUS_ESCAPED; break; }
         float3 before = x, pBefore = p;
         float stepSize = h;
-        GeodesicStep(x, p, pt, spin, h, tolerance);
-        // A rejected step leaves x unchanged, so z² ≥ 0 and no crossing is seen twice.
-        if (_DiskEnabled == 0 || before.z * x.z >= 0.0) continue;
+        if (!GeodesicStep(x, p, pt, spin, h, tolerance)) continue;
 
-        float3 crossing = EquatorCrossing(before, pBefore, x, p, pt, spin, stepSize);
-        if (!KerrDiskCrossing(crossing, pt, x.x * p.y - x.y * p.x, spin, radiance, transmittance))
+        if (_DiskEnabled != 0 && before.z * x.z < 0.0)
         {
-            status = KERR_STATUS_ABSORBED;
-            break;
+            float3 crossing = EquatorCrossing(before, pBefore, x, p, pt, spin, stepSize);
+            if (!KerrDiskCrossing(crossing, pt, x.x * p.y - x.y * p.x, spin, radiance, transmittance))
+            {
+                status = KERR_STATUS_ABSORBED;
+                break;
+            }
         }
+        if (_GasView != KERR_GAS_OFF) KerrGasStep(gas, x, float4(p, pt), spin, stepSize, h, transmittance);
     }
+    if (_GasView == KERR_GAS_EYE) radiance += KerrGasRgb(gas.visible);
     skyDir = normalize(KerrRaise(float4(p, pt), x, spin).xyz);
 }
 

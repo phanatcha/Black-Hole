@@ -78,7 +78,7 @@ namespace SilkySeal.Kerr
         internal const double TableMinX = 1e-12, TableMaxX = 300;
         internal const int TableSize = 6000;
         static double[] s_TableI, s_TableQ;
-        const double SmallXSlope = (PowerLawIndex - 3) / 2 + 1.0 / 3 + 1; // of the integrals below the grid
+        internal const double SmallXSlope = (PowerLawIndex - 3) / 2 + 1.0 / 3 + 1; // of the integrals below the grid
 
         /// <summary>The cutoff integrals at x = ν / (γ_min² ν_p); they level off at the Gamma-function values for x ≫ 1.</summary>
         internal static void PowerLawIntegrals(double x, out double gI, out double gQ)

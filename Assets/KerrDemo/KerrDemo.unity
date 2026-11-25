@@ -478,6 +478,7 @@ GameObject:
   - component: {fileID: 1914402829}
   - component: {fileID: 1914402828}
   - component: {fileID: 1914402830}
+  - component: {fileID: 1914402831}
   m_Layer: 0
   m_Name: Black Hole
   m_TagString: Untagged
@@ -537,6 +538,21 @@ MonoBehaviour:
   outerRadius: 30
   shifts: 1
   opacity: 1
+--- !u!114 &1914402831
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1914402827}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 527cf24adfb0a4437be58b59a95d50f2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SilkySeal.Kerr.Rendering::SilkySeal.Kerr.Rendering.HotGas
+  view: 2
+  fieldMix: {x: 0, y: 1, z: 0}
+  whiteKelvin: 6e+10
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

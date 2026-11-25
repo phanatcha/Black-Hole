@@ -37,6 +37,14 @@ The code is written for this package. These are the methods it implements.
 - CIE 1931 colour matching functions: Wyman, Sloan & Shirley 2013, J. Comput. Graph. Tech. 2(2), 1.
 - Star temperature from B − V: Ballesteros 2012, EPL 97, 34008.
 - Exposure: Lagarde & de Rousiers 2014, *Moving Frostbite to Physically Based Rendering 3.0*, SIGGRAPH course notes.
+- Hot accretion flow around Sgr A*: Yuan, Quataert & Narayan 2003, ApJ 598, 301; Broderick & Loeb 2006, MNRAS 367,
+  905; field strength from Broderick, Fish, Doeleman & Loeb 2011, ApJ 735, 110.
+- Synchrotron emission and absorption: Dexter 2016, MNRAS 462, 115; radiative transfer: Rybicki & Lightman 1979,
+  *Radiative Processes in Astrophysics*, Wiley.
+- Gas inside the ISCO: Mummery & Balbus 2022, Phys. Rev. Lett. 129, 161101.
+- Polarization carried along the ray: Walker & Penrose 1970, Commun. Math. Phys. 18, 265; Himwich, Johnson, Lupsasca &
+  Strominger 2020, Phys. Rev. D 101, 084020.
+- Radio false colour: matplotlib's afmhot colour map (Hunter 2007, Comput. Sci. Eng. 9, 90), the one EHT images use.
 
 The tests check the renderer against these:
 
@@ -45,3 +53,5 @@ The tests check the renderer against these:
 - Elliptic integrals: Carlson 1995, Numer. Algorithms 10, 13.
 - Photon ring subrings: Johnson et al. 2020, Sci. Adv. 6, eaaz1310.
 - M87* viewing geometry: Event Horizon Telescope Collaboration 2019, ApJL 875, L5.
+- Sgr A* ring size: Event Horizon Telescope Collaboration 2022, ApJL 930, L12.
+- Polarization twist β2: Palumbo, Wong & Prather 2020, ApJ 894, 156.

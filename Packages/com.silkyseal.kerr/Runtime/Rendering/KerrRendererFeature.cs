@@ -5,7 +5,8 @@ namespace SilkySeal.Kerr.Rendering
 {
     /// <summary>
     /// Adds Kerr lensing to a URP renderer. Runs for Game cameras that carry a <see cref="KerrObserver"/>,
-    /// lensing through the first enabled <see cref="BlackHole"/> and its <see cref="AccretionDisk"/>, if any.
+    /// lensing through the first enabled <see cref="BlackHole"/> and its <see cref="AccretionDisk"/> and
+    /// <see cref="HotGas"/>, if any.
     /// </summary>
     public sealed class KerrRendererFeature : ScriptableRendererFeature
     {
@@ -33,7 +34,8 @@ namespace SilkySeal.Kerr.Rendering
             // shortcut: only the first enabled hole is drawn; several holes need a sum of metrics or nested regions.
             var hole = BlackHole.Active[0];
             var disk = hole.TryGetComponent(out AccretionDisk d) && d.isActiveAndEnabled ? d : null;
-            _pass.Setup(traceShader, hole, observer, disk);
+            var gas = hole.TryGetComponent(out HotGas g) && g.isActiveAndEnabled ? g : null;
+            _pass.Setup(traceShader, hole, observer, disk, gas);
             renderer.EnqueuePass(_pass);
         }
 

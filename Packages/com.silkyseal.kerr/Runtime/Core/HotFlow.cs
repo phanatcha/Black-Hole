@@ -85,9 +85,10 @@ namespace SilkySeal.Kerr
             Math.Sqrt(8 * Math.PI * thermalDensity * Synchrotron.ProtonMass * Synchrotron.LightSpeed * Synchrotron.LightSpeed
                       / (6 * r * PlasmaBeta));
 
-        static double Profile(Vector3d x, double r, double scale, double slope)
+        double Profile(Vector3d x, double r, double scale, double slope)
         {
-            double rho2 = r * r - x.Z * x.Z;
+            // r² sin²θ from x² + y², which, unlike r² − z², does not cancel near the axis.
+            double rho2 = r * r * (x.X * x.X + x.Y * x.Y) / (r * r + Spin * Spin);
             // On the axis the Gaussian wins over the power law; 0 rather than ∞·0.
             return rho2 > 1e-12 ? scale * Math.Pow(rho2, 0.5 * slope) * Math.Exp(-0.5 * x.Z * x.Z / rho2) : 0;
         }

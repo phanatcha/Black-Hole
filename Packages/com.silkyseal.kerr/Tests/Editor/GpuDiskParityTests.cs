@@ -83,6 +83,7 @@ namespace SilkySeal.Kerr.Tests
                 shader.SetVector("_BlackbodyRange", DiskTables.BlackbodyRange);
                 shader.SetTexture(kernel, "_DiskFlux", flux);
                 shader.SetTexture(kernel, "_Blackbody", blackbody);
+                shader.SetTexture(kernel, "_GasPowerLaw", Texture2D.blackTexture); // declared by TraceRay; Metal wants it bound
                 shader.SetInt("_Blackout", 0);
                 shader.SetMatrix("_HoleToWorld", Matrix4x4.identity);
                 shader.SetBuffer(kernel, "_Trace", trace);

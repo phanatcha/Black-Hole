@@ -34,18 +34,43 @@ float4x4 _HoleToWorld;
 
 // CSShade only.
 RWTexture2D<float4> _Output;
+float _GasScale;       // radio and polarization views: 1 / the 230 GHz intensity drawn as white
 TextureCube _Sky;
 SamplerState sampler_Sky;
 float _UseSky;
 float _SkyLuminance;   // cd/m² of a sky texel valued 1
 
-// Past-directed null covector for the pixel centre; matches RayTracer.TracePixel.
-float4 PixelRay(uint2 id)
+// Past-directed null covector for the pixel centre, and its direction d in camera axes; matches RayTracer.TracePixel.
+float4 PixelRay(uint2 id, out float3 d)
 {
     float2 ndc = (float2(id) + 0.5) / float2(_Size) * 2.0 - 1.0;
-    float3 d = normalize(float3(ndc.x * _TanHalfFovY * _Aspect, ndc.y * _TanHalfFovY, 1.0));
+    d = normalize(float3(ndc.x * _TanHalfFovY * _Aspect, ndc.y * _TanHalfFovY, 1.0));
     float4 n = d.x * _CamRight + d.y * _CamUp + d.z * _CamForward;
     return KerrLower(n - _CamU, _CamPos, _Spin);
+}
+
+float4 KerrCameraVector(float3 v)
+{
+    return v.x * _CamRight + v.y * _CamUp + v.z * _CamForward;
+}
+
+// Mirror of WalkerPenrose.Screen: the inverse of κ's linear map from the pixel's (right, up) screen axes.
+float4 KerrGasScreen(float3 d)
+{
+    float3 e1 = normalize(float3(1.0, 0.0, 0.0) - d * d.x);
+    float3 e2 = float3(0.0, 1.0, 0.0) - d * d.y;
+    e2 = normalize(e2 - e1 * dot(e2, e1));
+    float4 k = KerrCameraVector(d) - _CamU;
+    float2 p = KerrWalkerPenrose(_CamPos, k, KerrCameraVector(e1), _Spin);
+    float2 q = KerrWalkerPenrose(_CamPos, k, KerrCameraVector(e2), _Spin);
+    return float4(q.y, -q.x, -p.y, p.x) / (p.x * q.y - q.x * p.y);
+}
+
+KerrGasRay KerrGasRayStart()
+{
+    KerrGasRay gas = (KerrGasRay)0;
+    gas.radioTransmittance = 1.0;
+    return gas;
 }
 
 // Debug and test kernel: writes (sky direction, status) per pixel.
@@ -53,26 +78,31 @@ float4 PixelRay(uint2 id)
 void CSTraceDirections(uint3 id : SV_DispatchThreadID)
 {
     if (any(id.xy >= (uint2)_Size)) return;
-    float3 skyDir, radiance;
+    float3 skyDir, radiance, d;
     float transmittance;
     int status;
-    TraceRay(_CamPos, PixelRay(id.xy), _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status, radiance, transmittance);
+    KerrGasRay gas = KerrGasRayStart();
+    TraceRay(_CamPos, PixelRay(id.xy, d), _Spin, _Tolerance, _FarRadius, _MaxSteps, gas, skyDir, status, radiance, transmittance);
     _Directions[id.y * _Size.x + id.x] = float4(skyDir, status);
 }
 
-// The geodesic part of a frame: one ray per pixel, disk light composited along it, the sky direction it leaves by.
+// The geodesic part of a frame: one ray per pixel, disk and gas light composited along it, the sky direction it leaves
+// by. The radio and polarization views leave the sky black and store the gas's (I, Q, U, transmittance) at 230 GHz.
 [numthreads(8, 8, 1)]
 void CSTrace(uint3 id : SV_DispatchThreadID)
 {
     if (any(id.xy >= (uint2)_Size)) return;
     float3 skyDir = 0.0, radiance = 0.0;
     float transmittance = 0.0, g = 0.0;
+    KerrGasRay gas = KerrGasRayStart();
     if (_Blackout == 0)
     {
         int status;
-        float4 k = PixelRay(id.xy);
-        TraceRay(_CamPos, k, _Spin, _Tolerance, _FarRadius, _MaxSteps, skyDir, status, radiance, transmittance);
-        if (status == KERR_STATUS_ESCAPED)
+        float3 d;
+        float4 k = PixelRay(id.xy, d);
+        if (_GasView == KERR_GAS_POLARIZATION) gas.screen = KerrGasScreen(d);
+        TraceRay(_CamPos, k, _Spin, _Tolerance, _FarRadius, _MaxSteps, gas, skyDir, status, radiance, transmittance);
+        if (status == KERR_STATUS_ESCAPED && _GasView <= KERR_GAS_EYE)
         {
             // k·u = 1 at the camera and k_t is conserved, so a source at rest far away sees the ray shifted by 1 / k_t.
             g = 1.0 / k.w;
@@ -83,7 +113,7 @@ void CSTrace(uint3 id : SV_DispatchThreadID)
     }
     uint i = id.y * _Size.x + id.x;
     _Trace[2 * i] = float4(skyDir, g);
-    _Trace[2 * i + 1] = float4(radiance, transmittance);
+    _Trace[2 * i + 1] = _GasView >= KERR_GAS_RADIO ? float4(gas.stokes, gas.radioTransmittance) : float4(radiance, transmittance);
 }
 
 // Sky direction through pixel p, or 0 where its ray did not escape or p is off screen.
@@ -124,6 +154,13 @@ void CSShade(uint3 id : SV_DispatchThreadID)
 {
     if (any(id.xy >= (uint2)_Size)) return;
     uint i = id.y * _Size.x + id.x;
+    if (_GasView >= KERR_GAS_RADIO)
+    {
+        // False colour straight to the output: no exposure and no meter sample, so the eye's adaptation waits.
+        float4 s = _Trace[2 * i + 1] * _GasScale;
+        _Output[id.xy] = float4(_GasView == KERR_GAS_RADIO ? KerrAfmhot(s.x) : KerrEvpaColour(s.yz), 1.0);
+        return;
+    }
     float4 sky = _Trace[2 * i], disk = _Trace[2 * i + 1];
     float3 color = disk.rgb;
     if (sky.w > 0.0)

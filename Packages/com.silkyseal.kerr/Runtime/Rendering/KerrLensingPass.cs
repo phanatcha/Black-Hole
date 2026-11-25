@@ -9,8 +9,8 @@ using UnityEngine.Rendering.Universal;
 namespace SilkySeal.Kerr.Rendering
 {
     /// <summary>
-    /// Traces one Kerr null geodesic per pixel, shades sky, stars and disk into an RGBA16F texture, then blits it over the
-    /// camera colour. GPU cost O(pixels × steps), steps ≤ <see cref="GpuMaxSteps"/>. CPU cost O(1) per camera, no GC,
+    /// Traces one Kerr null geodesic per pixel, shades sky, stars, disk and hot gas into an RGBA16F texture, then blits it
+    /// over the camera colour. GPU cost O(pixels × steps), steps ≤ <see cref="GpuMaxSteps"/>. CPU cost O(1) per camera, no GC,
     /// apart from baking the star map once when the hole's catalogue changes.
     /// </summary>
     sealed class KerrLensingPass : ScriptableRenderPass, IDisposable
@@ -66,20 +66,25 @@ namespace SilkySeal.Kerr.Rendering
         static readonly int s_DiskFlux = Shader.PropertyToID("_DiskFlux");
         static readonly int s_Blackbody = Shader.PropertyToID("_Blackbody");
         static readonly int s_BlackbodyRange = Shader.PropertyToID("_BlackbodyRange");
+        static readonly int s_GasView = Shader.PropertyToID("_GasView");
+        static readonly int s_Gas = Shader.PropertyToID("_Gas");
+        static readonly int s_GasPowerLaw = Shader.PropertyToID("_GasPowerLaw");
+        static readonly int s_GasScale = Shader.PropertyToID("_GasScale");
 
         // Transient per-recording data; every field is written in Fill before the pass executes.
         sealed class PassData
         {
             public ComputeShader shader;
             public int traceKernel, shadeKernel, measureKernel;
-            public TextureHandle output, sky, diskFlux, blackbody, stars, spectrum, spectrumWeights;
+            public TextureHandle output, sky, diskFlux, blackbody, stars, spectrum, spectrumWeights, gasPowerLaw;
             public BufferHandle trace, meter, exposureState;
             public Vector4 camPos, camU, camRight, camUp, camForward, diskRange;
             public Matrix4x4 holeToWorld;
-            public float spin, tanHalfFovY, aspect, farRadius, useSky, skyLuminance, diskOpacity;
+            public float spin, tanHalfFovY, aspect, farRadius, useSky, skyLuminance, diskOpacity, gasScale;
             public float manualEV100, exposureCompensation, deltaTime, adaptationSpeed;
-            public int blackout, diskEnabled, diskShifts, autoExposure, meterCount, starSize, starLevels;
+            public int blackout, diskEnabled, diskShifts, autoExposure, meterCount, starSize, starLevels, gasView;
             public readonly int[] size = new int[2];
+            public readonly Vector4[] gas = new Vector4[GasTables.ParameterCount];
         }
 
         ComputeShader _shader;
@@ -89,9 +94,10 @@ namespace SilkySeal.Kerr.Rendering
         BlackHole _hole;
         KerrObserver _observer;
         AccretionDisk _disk;
+        HotGas _gas;
         Vector4 _diskRange;
-        RTHandle _skyHandle, _diskFluxHandle, _blackbodyHandle, _starsHandle, _spectrumHandle, _spectrumWeightsHandle;
-        Texture2D _blackbody, _spectrumWeights;
+        RTHandle _skyHandle, _diskFluxHandle, _blackbodyHandle, _starsHandle, _spectrumHandle, _spectrumWeightsHandle, _gasPowerLawHandle;
+        Texture2D _blackbody, _spectrumWeights, _gasPowerLaw;
         Texture2DArray _stars, _spectrum;
         TextAsset _starsSource;
 
@@ -103,7 +109,7 @@ namespace SilkySeal.Kerr.Rendering
         }
 
         /// <summary>Called by the feature each frame before EnqueuePass.</summary>
-        public void Setup(ComputeShader shader, BlackHole hole, KerrObserver observer, AccretionDisk disk)
+        public void Setup(ComputeShader shader, BlackHole hole, KerrObserver observer, AccretionDisk disk, HotGas gas)
         {
             if (_shader != shader)
             {
@@ -115,6 +121,7 @@ namespace SilkySeal.Kerr.Rendering
             _hole = hole;
             _observer = observer;
             _disk = disk;
+            _gas = gas;
         }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -148,6 +155,9 @@ namespace SilkySeal.Kerr.Rendering
             if (_spectrum == null) _spectrum = SkyTables.BakeSpectrum(out _spectrumWeights);
             var spectrum = renderGraph.ImportTexture(Wrap(ref _spectrumHandle, _spectrum));
             var spectrumWeights = renderGraph.ImportTexture(Wrap(ref _spectrumWeightsHandle, _spectrumWeights));
+            // Baked even with no gas: the trace kernel declares it, and Metal wants every declared texture bound.
+            if (_gasPowerLaw == null) _gasPowerLaw = GasTables.BakePowerLaw();
+            var gasPowerLaw = renderGraph.ImportTexture(Wrap(ref _gasPowerLawHandle, _gasPowerLaw));
 
             using (var builder = renderGraph.AddComputePass<PassData>("Kerr Trace", out var data))
             {
@@ -161,6 +171,7 @@ namespace SilkySeal.Kerr.Rendering
                 data.starLevels = _stars.mipmapCount;
                 data.spectrum = spectrum;
                 data.spectrumWeights = spectrumWeights;
+                data.gasPowerLaw = gasPowerLaw;
                 data.trace = trace;
                 data.meter = meter;
                 data.meterCount = meterCount;
@@ -175,6 +186,7 @@ namespace SilkySeal.Kerr.Rendering
                 builder.UseTexture(stars, AccessFlags.Read);
                 builder.UseTexture(spectrum, AccessFlags.Read);
                 builder.UseTexture(spectrumWeights, AccessFlags.Read);
+                builder.UseTexture(gasPowerLaw, AccessFlags.Read);
                 builder.SetRenderFunc(static (PassData d, ComputeGraphContext ctx) => Execute(d, ctx));
             }
 
@@ -210,7 +222,11 @@ namespace SilkySeal.Kerr.Rendering
             d.exposureCompensation = _observer.ExposureCompensation;
             d.adaptationSpeed = _observer.AdaptationSpeed;
             d.deltaTime = Time.unscaledDeltaTime; // adaptation is the eye's, not the simulation's
-            d.diskEnabled = _disk != null ? 1 : 0;
+            d.gasView = _gas != null ? (int)_gas.CurrentView : 0;
+            if (_gas != null) GasTables.Parameters(_gas.Flow(_hole.Spin), d.gas);
+            d.gasScale = _gas != null ? GasTables.WhiteScale(_gas.WhiteKelvin) : 0;
+            // A thin disk is dark at 230 GHz, so the radio views draw the gas alone.
+            d.diskEnabled = _disk != null && d.gasView < (int)HotGas.View.Radio ? 1 : 0;
             d.diskShifts = _disk != null && _disk.Shifts ? 1 : 0;
             d.diskOpacity = _disk != null ? _disk.Opacity : 0;
             d.diskRange = _diskRange;
@@ -240,6 +256,9 @@ namespace SilkySeal.Kerr.Rendering
             cmd.SetComputeVectorParam(d.shader, s_BlackbodyRange, DiskTables.BlackbodyRange);
             cmd.SetComputeTextureParam(d.shader, d.traceKernel, s_DiskFlux, d.diskFlux);
             cmd.SetComputeTextureParam(d.shader, d.traceKernel, s_Blackbody, d.blackbody);
+            cmd.SetComputeIntParam(d.shader, s_GasView, d.gasView);
+            cmd.SetComputeVectorArrayParam(d.shader, s_Gas, d.gas);
+            cmd.SetComputeTextureParam(d.shader, d.traceKernel, s_GasPowerLaw, d.gasPowerLaw);
             cmd.SetComputeBufferParam(d.shader, d.traceKernel, s_Trace, d.trace);
             int groupsX = (d.size[0] + ThreadGroupSize - 1) / ThreadGroupSize, groupsY = (d.size[1] + ThreadGroupSize - 1) / ThreadGroupSize;
             cmd.DispatchCompute(d.shader, d.traceKernel, groupsX, groupsY, 1);
@@ -249,6 +268,7 @@ namespace SilkySeal.Kerr.Rendering
             cmd.SetComputeIntParam(d.shader, s_StarSize, d.starSize);
             cmd.SetComputeIntParam(d.shader, s_StarLevels, d.starLevels);
             cmd.SetComputeIntParam(d.shader, s_AutoExposure, d.autoExposure);
+            cmd.SetComputeFloatParam(d.shader, s_GasScale, d.gasScale);
             cmd.SetComputeFloatParam(d.shader, s_ManualEV100, d.manualEV100);
             cmd.SetComputeFloatParam(d.shader, s_ExposureCompensation, d.exposureCompensation);
             cmd.SetComputeBufferParam(d.shader, d.shadeKernel, s_Trace, d.trace);
@@ -262,7 +282,8 @@ namespace SilkySeal.Kerr.Rendering
             cmd.SetComputeTextureParam(d.shader, d.shadeKernel, s_Output, d.output);
             cmd.DispatchCompute(d.shader, d.shadeKernel, groupsX, groupsY, 1);
 
-            if (d.autoExposure == 0) return;
+            // The false-colour views skip exposure, so there is nothing to meter.
+            if (d.autoExposure == 0 || d.gasView >= (int)HotGas.View.Radio) return;
             // Meters this frame, exposes the next: a one-frame lag nobody sees at adaptation speeds of seconds.
             cmd.SetComputeIntParam(d.shader, s_MeterCount, d.meterCount);
             cmd.SetComputeFloatParam(d.shader, s_DeltaTime, d.deltaTime);
@@ -310,8 +331,11 @@ namespace SilkySeal.Kerr.Rendering
             _starsHandle?.Release();
             _spectrumHandle?.Release();
             _spectrumWeightsHandle?.Release();
-            _skyHandle = _diskFluxHandle = _blackbodyHandle = _starsHandle = _spectrumHandle = _spectrumWeightsHandle = null;
+            _gasPowerLawHandle?.Release();
+            _skyHandle = _diskFluxHandle = _blackbodyHandle = _starsHandle = _spectrumHandle = _spectrumWeightsHandle = _gasPowerLawHandle = null;
             CoreUtils.Destroy(_blackbody);
+            CoreUtils.Destroy(_gasPowerLaw);
+            _gasPowerLaw = null;
             CoreUtils.Destroy(_stars);
             CoreUtils.Destroy(_spectrum);
             CoreUtils.Destroy(_spectrumWeights);
