@@ -18,6 +18,16 @@
 #define KERR_SWIRL_NOISE_GAIN 1.8
 #define KERR_SWIRL_CLUMP_GAIN 0.8
 #define KERR_SWIRL_OCTAVES 3
+#define KERR_SWIRL_DRIFT 0.7
+#define KERR_SWIRL_DRIFT_ACROSS 0.8
+#define KERR_SWIRL_DRIFT_ALONG 2.0
+#define KERR_SWIRL_RIBBON_MASK_ACROSS 0.7
+#define KERR_SWIRL_RIBBON_MASK_ALONG 2.5
+#define KERR_SWIRL_RIBBON_LOW -0.05
+#define KERR_SWIRL_RIBBON_SPAN 0.35
+#define KERR_SWIRL_RIBBON_FREQUENCY 1.0
+#define KERR_SWIRL_RIBBON_GAIN 0.6
+#define KERR_SWIRL_RIBBON_STRANDS 0.2
 
 // Turns in [0, 1), four rings to a vector: the disk's rings, then the hot flow's coarser ones (SwirlTables).
 float4 _SwirlTurns[(KERR_SWIRL_RINGS + KERR_SWIRL_RINGS / KERR_SWIRL_GAS_COARSENESS) / 4];
@@ -68,6 +78,18 @@ float KerrSwirlFbm(float3 p, uint hash)
         amplitude *= 0.5;
     }
     return sum;
+}
+
+// Fine strands that drift, bunch and merge into one broad ribbon for part of their orbit; see SwirlPattern.Strands.
+float KerrSwirlStrands(float2 d, float height, uint hash)
+{
+    float2 o = float2(hash & 0xFFFu, (hash >> 12u) & 0xFFFu) / 16.0;
+    float drift = d.x + KERR_SWIRL_DRIFT * KerrSwirlNoise(float3(d.x * KERR_SWIRL_DRIFT_ACROSS + o.x + 13.1, d.y * KERR_SWIRL_DRIFT_ALONG + o.y + 3.3, 9.5));
+    float fine = KerrSwirlFbm(float3(drift * KERR_SWIRL_ACROSS, d.y * KERR_SWIRL_ALONG, height * KERR_SWIRL_ACROSS), hash);
+    float mask = smoothstep(KERR_SWIRL_RIBBON_LOW, KERR_SWIRL_RIBBON_LOW + KERR_SWIRL_RIBBON_SPAN,
+        KerrSwirlNoise(float3(d.x * KERR_SWIRL_RIBBON_MASK_ACROSS + o.x + 41.3, d.y * KERR_SWIRL_RIBBON_MASK_ALONG + o.y + 17.9, 5.5)));
+    float broad = KERR_SWIRL_RIBBON_GAIN * KerrSwirlNoise(float3(d.x * KERR_SWIRL_RIBBON_FREQUENCY + o.x + 7.7, d.y * KERR_SWIRL_ALONG + o.y, 0.5));
+    return lerp(fine, broad + KERR_SWIRL_RIBBON_STRANDS * fine, mask);
 }
 
 // The point's position along ring j, in cells from the ring's own zero, in [0, slots), delay after the camera's time.
@@ -136,7 +158,7 @@ float KerrSwirl(float contrast, int coarseness, float r, float phi, float z, flo
             if (w < KERR_SWIRL_WEIGHT_FLOOR) continue;
             // Coarse patterns (the gas) draw one smooth value per cell; see SwirlPattern.GasCoarseness.
             sum += w * (coarseness == 1
-                ? KERR_SWIRL_NOISE_GAIN * KerrSwirlFbm(float3(d.x * KERR_SWIRL_ACROSS, d.y * KERR_SWIRL_ALONG, height * KERR_SWIRL_ACROSS), hash)
+                ? KERR_SWIRL_NOISE_GAIN * KerrSwirlStrands(d, height, hash)
                 : KERR_SWIRL_CLUMP_GAIN * cos(6.28318531 * (hash * 2.32830644e-10 + height / KERR_SWIRL_CLUMP_HEIGHT)));
             weights += w;
         }

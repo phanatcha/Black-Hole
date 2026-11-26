@@ -30,6 +30,12 @@ namespace SilkySeal.Kerr
         // before it is clipped to ±1.
         const double Jitter = 0.8, Sharpness = 8, WeightFloor = 1e-3, AcrossFrequency = 2, AlongFrequency = 0.6,
                      ClumpHeight = 2, NoiseGain = 1.8, ClumpGain = 0.8;
+        // Strands drift across the orbit by up to about Drift cells, by a noise at DriftAcross and DriftAlong per cell.
+        // Ribbons: a mask noise, per cell across and along, whose rise from RibbonLow over RibbonSpan fades the strands
+        // into a broad band at RibbonFrequency across, RibbonGain strong, still holding RibbonStrands of the strands.
+        const double Drift = 0.7, DriftAcross = 0.8, DriftAlong = 2,
+                     RibbonMaskAcross = 0.7, RibbonMaskAlong = 2.5, RibbonLow = -0.05, RibbonSpan = 0.35,
+                     RibbonFrequency = 1, RibbonGain = 0.6, RibbonStrands = 0.2;
         const int Octaves = 3;
 
         public readonly double Spin, Contrast, Time;
@@ -92,7 +98,7 @@ namespace SilkySeal.Kerr
                     double w = Math.Exp(-Sharpness * (du * du + dv * dv - nearest));
                     if (w < WeightFloor) continue;
                     sum += w * (Coarseness == 1
-                        ? NoiseGain * Fbm(du * AcrossFrequency, dv * AlongFrequency, height * AcrossFrequency, hash)
+                        ? NoiseGain * Strands(du, dv, height, hash)
                         : ClumpGain * Math.Cos(2 * Math.PI * (Unit(hash) + height / ClumpHeight)));
                     weights += w;
                 }
@@ -116,6 +122,19 @@ namespace SilkySeal.Kerr
             du = u - (ring + 0.5 + Jitter * (Unit(hash) - 0.5));
             dv = along - (slot + 0.5 + Jitter * (Unit(next) - 0.5));
             hash = Pcg(next);
+        }
+
+        // Fine strands that drift across the orbit as they go round, bunching and spreading, and for part of the way
+        // merge into one broad ribbon before parting again; all in the seed's frame, so no dark lane runs on for long.
+        static double Strands(double du, double dv, double height, uint hash)
+        {
+            double x = (hash & 0xFFF) / 16.0, y = ((hash >> 12) & 0xFFF) / 16.0;
+            double drift = du + Drift * Noise(du * DriftAcross + x + 13.1, dv * DriftAlong + y + 3.3, 9.5);
+            double fine = Fbm(drift * AcrossFrequency, dv * AlongFrequency, height * AcrossFrequency, hash);
+            double t = (Noise(du * RibbonMaskAcross + x + 41.3, dv * RibbonMaskAlong + y + 17.9, 5.5) - RibbonLow) / RibbonSpan;
+            t = Math.Max(0, Math.Min(1, t));
+            double broad = RibbonGain * Noise(du * RibbonFrequency + x + 7.7, dv * AlongFrequency + y, 0.5);
+            return Lerp(t * t * (3 - 2 * t), fine, broad + RibbonStrands * fine);
         }
 
         // Improved gradient noise (Perlin 2002) over octaves, shifted by the seed's hash so each cell has its own patch.
