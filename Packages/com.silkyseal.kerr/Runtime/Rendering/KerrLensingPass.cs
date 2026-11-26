@@ -240,7 +240,7 @@ namespace SilkySeal.Kerr.Rendering
             d.gasSwirl = _gas != null ? _gas.Clumps : 0;
             // Scene time stands still outside Play mode; the wall clock keeps the disk turning in the editor.
             double seconds = Application.isPlaying ? Time.timeAsDouble : Time.realtimeSinceStartupAsDouble;
-            SwirlTables.Turns(_hole.Spin, _hole.CoordinateTime(seconds), d.swirlTurns);
+            SwirlTables.Turns(_hole.Spin, _observer.CoordinateTime(_hole, seconds), d.swirlTurns);
         }
 
         static void Execute(PassData d, ComputeGraphContext ctx)

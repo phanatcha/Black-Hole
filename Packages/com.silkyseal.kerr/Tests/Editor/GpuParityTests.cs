@@ -29,17 +29,34 @@ namespace SilkySeal.Kerr.Tests
 
         [TestCase(0.6)]
         [TestCase(0.999)]
-        public void GpuParity_EscapeDirectionsWithinOnePixel(double a)
+        public void GpuParity_EscapeDirectionsWithinOnePixel(double a) => AssertParity(TestFrame(a), $"a={a}");
+
+        // Falling through r₊ at a = 0.6, 0.1 M inside, looking along the orbit: sky above, black from 15° below. Along that
+        // edge E − Ω_H L → 0, the light lingered at r₊ and its sky winds round fast, as at the photon ring outside: float
+        // error there is amplified, all within 4 grid pixels of the black. So the 1-pixel bar applies beyond them.
+        [Test]
+        public void GpuParity_InsideTheHorizon()
+        {
+            const double a = 0.6;
+            var x0 = new Vector3d(8, 0, 1.5);
+            var fall = new FreeFall(x0, ObserverFrame.Zamo(x0, a), a);
+            while (fall.Radius > KerrSchild.HorizonRadius(a) - 0.1) fall.Advance(0.01);
+            var up = fall.Position.Normalized;
+            var side = new Vector3d(-up.Y, up.X, 0).Normalized;
+            AssertParity(ObserverFrame.FromVelocity(fall.Position, a, fall.Velocity, side, up, Vector3d.Cross(up, side)), "inside", 4);
+        }
+
+        // edgeBand: escaped rays this many grid pixels or fewer from a captured one are left out of the 1-pixel bar.
+        static void AssertParity(CameraFrame frame, string label, int edgeBand = 0)
         {
             var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(ShaderPath);
             Assert.IsNotNull(shader, $"Compute shader missing at {ShaderPath}");
 
-            var frame = TestFrame(a);
             var gpu = RunGpu(shader, frame);
             var cpu = RunCpu(frame);
 
             double pixelAngle = VerticalFov / ReferenceLines;
-            int bothEscaped = 0, withinPixel = 0, edgeMismatch = 0, interiorMismatch = 0, gpuMaxSteps = 0;
+            int bothEscaped = 0, withinPixel = 0, edgeMismatch = 0, interiorMismatch = 0, gpuMaxSteps = 0, banded = 0;
             double maxError = 0;
             for (int y = 0; y < GridHeight; y++)
             for (int x = 0; x < GridWidth; x++)
@@ -56,6 +73,7 @@ namespace SilkySeal.Kerr.Tests
                     continue;
                 }
                 if (cStatus != Status.Escaped) continue;
+                if (NearCapture(cpu, x, y, edgeBand)) { banded++; continue; }
 
                 bothEscaped++;
                 var d = cpu[i].SkyDirection;
@@ -66,8 +84,8 @@ namespace SilkySeal.Kerr.Tests
             }
 
             double fraction = (double)withinPixel / bothEscaped;
-            Debug.Log($"[GpuParity a={a}] within 1px {fraction:P3} of {bothEscaped}, max error {maxError / pixelAngle:F2} px, " +
-                      $"edge mismatches {edgeMismatch}, interior mismatches {interiorMismatch}, GPU MaxSteps {gpuMaxSteps}");
+            Debug.Log($"[GpuParity {label}] within 1px {fraction:P3} of {bothEscaped}, max error {maxError / pixelAngle:F2} px, " +
+                      $"edge mismatches {edgeMismatch}, interior mismatches {interiorMismatch}, GPU MaxSteps {gpuMaxSteps}, left out {banded}");
 
             Assert.Greater(bothEscaped, GridWidth * GridHeight / 2, "most rays should escape");
             Assert.GreaterOrEqual(fraction, RequiredWithinPixelFraction);
@@ -151,6 +169,14 @@ namespace SilkySeal.Kerr.Tests
         // HLSL side stores 4-vectors as (x, y, z, t) so .xyz is the spatial part.
         static Vector4 ToFloat(Vector4d v) => new Vector4((float)v.X, (float)v.Y, (float)v.Z, (float)v.T);
         static Vector4 ToFloat(Vector3d v) => new Vector4((float)v.X, (float)v.Y, (float)v.Z, 0);
+
+        static bool NearCapture(RayResult[] cpu, int x, int y, int band)
+        {
+            for (int v = Math.Max(0, y - band); v <= Math.Min(GridHeight - 1, y + band); v++)
+            for (int u = Math.Max(0, x - band); u <= Math.Min(GridWidth - 1, x + band); u++)
+                if (cpu[v * GridWidth + u].Status != RayStatus.Escaped) return true;
+            return false;
+        }
 
         // A ray is on the shadow edge when any 4-neighbour ended differently on the CPU.
         static bool IsEdge(RayResult[] cpu, int x, int y)

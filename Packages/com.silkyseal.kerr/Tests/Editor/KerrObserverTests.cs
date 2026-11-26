@@ -75,6 +75,26 @@ namespace SilkySeal.Kerr.Tests
             Assert.AreEqual(1 / Math.Sqrt(1 - ClampedBeta * ClampedBeta), gamma, 1e-6);
         }
 
+        [Test]
+        public void FreeFall_CarriesTheFrameInsideTheHorizon_UntilCleared()
+        {
+            SetFloat("spin", 0.6f);
+            double a = _hole.Spin;
+            var x0 = new Vector3d(8, 0, 1.5);
+            var fall = new FreeFall(x0, ObserverFrame.Zamo(x0, a), a, 500);
+            while (fall.Radius > 1.5) fall.Advance(0.05); // r₊ = 1.8
+            _observer.SetFreeFall(fall.Position, fall.Velocity, fall.Time);
+
+            Assert.IsTrue(_observer.TryGetFrame(_hole, out var f));
+            Assert.AreEqual(0, (f.Position - fall.Position).Length);
+            Assert.AreEqual(-1, KerrSchild.Dot(f.U, fall.Velocity, f.Position, a), 1e-9);
+            Assert.AreEqual(fall.Time, _observer.CoordinateTime(_hole, 2), "the disk turns on the fall's clock");
+
+            _observer.ClearFreeFall();
+            Assert.IsFalse(_observer.TryGetFrame(_hole, out _), "back on the Transform, which sits at the centre");
+            Assert.AreEqual(_hole.CoordinateTime(2), _observer.CoordinateTime(_hole, 2));
+        }
+
         void SetFloat(string field, float value)
         {
             var so = new SerializedObject(_hole);

@@ -79,6 +79,28 @@ namespace SilkySeal.Kerr.Tests
             return (_go.transform.position - before) / Frame;
         }
 
+        // While a free fall carries the camera the keys must not push it.
+        [Test]
+        public void MovementOff_KeysDoNotMove()
+        {
+            _fly.MovementEnabled = false;
+            Press(_keyboard.wKey);
+            for (int i = 0; i < 60; i++) _fly.Tick(Frame);
+            Assert.AreEqual(Vector3.zero, _go.transform.position);
+        }
+
+        // A scripted fall turns the camera to face the hole; looking around then starts from there.
+        [Test]
+        public void MovementOff_LookStartsFromTheCurrentRotation()
+        {
+            _go.transform.rotation = Quaternion.Euler(0, 40, 0);
+            _fly.MovementEnabled = false;
+            Press(_mouse.rightButton);
+            Set(_mouse.delta, new Vector2(100, 0));
+            _fly.Tick(0.016f);
+            Assert.AreEqual(40 + 100 * LookDegreesPerPixel, _go.transform.eulerAngles.y, Tolerance);
+        }
+
         [Test]
         public void MouseDelta_TurnsOnlyWhileRightButtonHeld()
         {

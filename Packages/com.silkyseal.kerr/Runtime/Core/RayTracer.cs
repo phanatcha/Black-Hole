@@ -61,8 +61,8 @@ namespace SilkySeal.Kerr
     public static class RayTracer
     {
         /// <summary>
-        /// Capture happens at r₊ + margin. In ingoing Kerr-Schild coordinates a past-directed ray only
-        /// approaches the future horizon geometrically (its momentum diverges), so r ≤ r₊ is never reached.
+        /// Capture happens at r₊ + margin, on the way in. In ingoing Kerr-Schild coordinates a past-directed ray from outside
+        /// only approaches the future horizon geometrically (its momentum diverges), so r ≤ r₊ is never reached.
         /// 1e-3 stays below the smallest gap between r₊ and the prograde photon orbit (0.0022 at a = 0.9999),
         /// so no escaping ray is cut off.
         /// </summary>
@@ -73,6 +73,10 @@ namespace SilkySeal.Kerr
         /// <summary>
         /// Integrates from x0 with past-directed null covector k0 until capture, escape or MaxSteps.
         /// O(steps); at most s.MaxSteps metric-gradient evaluations × 6. Allocation-free.
+        /// From inside r₊ every past-directed ray climbs back to r₊. With E − Ω_H L &gt; 0 (E = k_t, L = −k_φ for the
+        /// light's own direction) it crosses into the outside, where it came from; with E − Ω_H L &lt; 0 it would cross the
+        /// other branch of r₊, from the eternal hole's second universe or, in a real one, the collapsing star, which this
+        /// chart does not reach: it is captured at once (Steps = MaxSteps), so the region below a falling camera is black.
         /// </summary>
         public static RayResult Trace(Vector3d x0, Vector4d k0Lower, in TraceSettings s)
         {
@@ -84,25 +88,29 @@ namespace SilkySeal.Kerr
         public static RayResult Trace<T>(Vector3d x0, Vector4d k0Lower, in TraceSettings s, ref T observer)
             where T : struct, IRayObserver
         {
-            double a = s.Spin, pt = k0Lower.T;
-            double captureRadius = KerrSchild.HorizonRadius(a) + HorizonMargin;
+            double a = s.Spin, pt = k0Lower.T, horizon = KerrSchild.HorizonRadius(a);
+            double captureRadius = horizon + HorizonMargin;
             var x = x0;
             var p = k0Lower.Spatial;
             double time = 0;
-            double h = InitialStepPerRadius * KerrSchild.Radius(x0, a);
+            double r = KerrSchild.Radius(x0, a), previous = r;
+            double h = InitialStepPerRadius * r;
             double maxAbsH = Math.Abs(KerrSchild.Hamiltonian(x, k0Lower, a));
 
             var status = RayStatus.MaxSteps;
             int steps = 0, crossings = 0;
-            if (!observer.OnStep(x, 0, k0Lower, 0, ref h)) { status = RayStatus.Absorbed; steps = s.MaxSteps; }
+            if (r < horizon && pt + a / (2 * horizon) * (x.X * p.Y - x.Y * p.X) < 0) { status = RayStatus.Captured; steps = s.MaxSteps; }
+            else if (!observer.OnStep(x, 0, k0Lower, 0, ref h)) { status = RayStatus.Absorbed; steps = s.MaxSteps; }
             for (; steps < s.MaxSteps; steps++)
             {
-                if (KerrSchild.Radius(x, a) <= captureRadius) { status = RayStatus.Captured; break; }
+                r = KerrSchild.Radius(x, a);
+                if (r <= captureRadius && r < previous) { status = RayStatus.Captured; break; }
                 if (x.Length >= s.FarRadius) { status = RayStatus.Escaped; break; }
                 var before = new Vector4d(time, x);
                 var pBefore = p;
                 double stepSize = h;
                 if (!GeodesicIntegrator.Step(ref x, ref time, ref p, pt, a, ref h, s.Tolerance)) continue;
+                previous = r;
                 var pLower = new Vector4d(pt, p);
                 maxAbsH = Math.Max(maxAbsH, Math.Abs(KerrSchild.Hamiltonian(x, pLower, a)));
                 if (before.Z * x.Z < 0)

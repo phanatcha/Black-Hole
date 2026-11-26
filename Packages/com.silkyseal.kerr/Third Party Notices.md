@@ -50,6 +50,9 @@ The code is written for this package. These are the methods it implements.
   post's description; its code was not used.
 - Gradient noise: Perlin 2002, *Improving Noise*, ACM Trans. Graph. 21(3), 681. Integer hash: O'Neill 2014, *PCG*,
   Harvey Mudd College HMC-CS-2014-0905, as chosen by Jarzynski & Olano 2020, J. Comput. Graph. Tech. 9(3), 21.
+- The plunge and its two scripted falls: NASA Scientific Visualization Studio 14576, Schnittman & Powell 2024,
+  https://svs.gsfc.nasa.gov/14576. Written here from its description; no code or frames were used.
+- Zoom-whirl orbits: Levin & Perez-Giz 2008, Phys. Rev. D 77, 103005.
 
 The tests check the renderer against these:
 
@@ -60,3 +63,4 @@ The tests check the renderer against these:
 - M87* viewing geometry: Event Horizon Telescope Collaboration 2019, ApJL 875, L5.
 - Sgr A* ring size: Event Horizon Telescope Collaboration 2022, ApJL 930, L12.
 - Polarization twist β2: Palumbo, Wong & Prather 2020, ApJ 894, 156.
+- Falling from rest far away (the rain frame): Hamilton & Lisle 2008, Am. J. Phys. 76, 519.

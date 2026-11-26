@@ -260,6 +260,7 @@ GameObject:
   - component: {fileID: 423031139}
   - component: {fileID: 423031138}
   - component: {fileID: 423031143}
+  - component: {fileID: 423031144}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -367,7 +368,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 423031137}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.07742082, y: 0, z: 0, w: 0.99699850}
+  m_LocalRotation: {x: 0.07742082, y: 0, z: 0, w: 0.9969985}
   m_LocalPosition: {x: 0, y: 7.5, z: -48}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -418,6 +419,19 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
+--- !u!114 &423031144
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 423031137}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdcbf1fe5a6334c06997db8a7619045b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SilkySeal.Kerr.Controls::SilkySeal.Kerr.Controls.PlungeCamera
+  orbitsPerSecond: 0.1
 --- !u!1 &1448427874
 GameObject:
   m_ObjectHideFlags: 0

@@ -95,30 +95,39 @@ float4 EquatorCrossing(float4 x0, float4 v0, float4 x1, float4 v1)
 // Traces a past-directed null covector kLower = (p_x, p_y, p_z, p_t) from x0, shading the disk on the way when
 // _DiskEnabled and the hot gas when _GasView is on. radiance is the disk and eye-view gas light collected,
 // transmittance what still shows of the sky behind it; gas carries the 230 GHz Stokes parameters.
-// Cost: at most maxSteps × 6 gradient evaluations.
+// Cost: at most maxSteps × 6 gradient evaluations. Capture as in RayTracer.Trace: at r₊ + margin on the way in, and at
+// once from inside r₊ when E − Ω_H L < 0, light the chart cannot follow back.
 void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRadius, int maxSteps, inout KerrGasRay gas,
               out float3 skyDir, out int status, out float3 radiance, out float transmittance)
 {
     radiance = 0.0;
     transmittance = 1.0;
-    float captureRadius = KerrHorizonRadius(spin) + KERR_HORIZON_MARGIN;
+    float horizon = KerrHorizonRadius(spin), captureRadius = horizon + KERR_HORIZON_MARGIN;
     float3 x = x0;
     float3 p = kLower.xyz;
     float pt = kLower.w;
-    float h = KERR_INITIAL_STEP_PER_RADIUS * KerrRadius(x0, spin);
+    float r = KerrRadius(x0, spin), previous = r;
+    float h = KERR_INITIAL_STEP_PER_RADIUS * r;
     float time = 0.0; // Kerr-Schild coordinate time relative to the camera
 
     status = KERR_STATUS_MAX_STEPS;
-    if (_GasView != KERR_GAS_OFF) KerrGasStep(gas, x, 0.0, kLower, spin, 0.0, h, transmittance);
+    if (r < horizon && pt + spin / (2.0 * horizon) * (x.x * p.y - x.y * p.x) < 0.0)
+    {
+        status = KERR_STATUS_CAPTURED;
+        maxSteps = 0;
+    }
+    else if (_GasView != KERR_GAS_OFF) KerrGasStep(gas, x, 0.0, kLower, spin, 0.0, h, transmittance);
     [loop]
     for (int i = 0; i < maxSteps; i++)
     {
-        if (KerrRadius(x, spin) <= captureRadius) { status = KERR_STATUS_CAPTURED; break; }
+        r = KerrRadius(x, spin);
+        if (r <= captureRadius && r < previous) { status = KERR_STATUS_CAPTURED; break; }
         if (length(x) >= farRadius) { status = KERR_STATUS_ESCAPED; break; }
         float4 before = float4(x, time);
         float3 pBefore = p;
         float stepSize = h;
         if (!GeodesicStep(x, time, p, pt, spin, h, tolerance)) continue;
+        previous = r;
 
         if (_DiskEnabled != 0 && before.z * x.z < 0.0)
         {

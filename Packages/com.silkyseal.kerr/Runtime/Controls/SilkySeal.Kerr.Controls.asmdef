@@ -2,6 +2,8 @@
     "name": "SilkySeal.Kerr.Controls",
     "rootNamespace": "SilkySeal.Kerr.Controls",
     "references": [
+        "SilkySeal.Kerr.Core",
+        "SilkySeal.Kerr.Rendering",
         "Unity.InputSystem"
     ],
     "includePlatforms": [],

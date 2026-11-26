@@ -48,7 +48,7 @@ namespace SilkySeal.Kerr.Rendering
 
         /// <summary>
         /// Kerr-Schild coordinate time in M after this many seconds. shortcut: treats scene time as the distant
-        /// observers' time, which drifts from a deep or fast camera's own; use the camera's worldline once it plunges.
+        /// observers' time, which drifts from a deep or fast camera's own; a falling KerrObserver uses its fall's instead.
         /// </summary>
         public double CoordinateTime(double seconds) => seconds * speedOfLight / unitsPerM;
         public Cubemap Sky => sky;
@@ -76,6 +76,10 @@ namespace SilkySeal.Kerr.Rendering
             var local = transform.InverseTransformDirection(worldDir);
             return new Vector3d(local.x, local.z, local.y);
         }
+
+        /// <summary>Kerr-Schild coordinates in units of M back to a world position.</summary>
+        public Vector3 KerrSchildToWorld(Vector3d x) =>
+            transform.TransformPoint(new Vector3((float)x.X, (float)x.Z, (float)x.Y) * unitsPerM);
 
         /// <summary>Kerr-Schild direction back to a world direction.</summary>
         public Vector3 KerrSchildDirToWorld(Vector3d d) =>
