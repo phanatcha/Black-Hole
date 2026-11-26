@@ -42,6 +42,10 @@ namespace SilkySeal.Kerr.Rendering
         [Tooltip("Fraction of light blocked per pass through the disk. 1 is physical; lower shows the sky through it.")]
         [SerializeField, Range(0, 1)] float opacity = 1;
 
+        [Tooltip("Contrast of the streaks that orbit with the gas, each ring at its own Kepler rate. 0 is the smooth " +
+                 "textbook disk; the light averages the same either way.")]
+        [SerializeField, Range(0, 1)] float streaks = 1;
+
         BlackHole _hole;
         Texture2D _table;
         Vector4 _range;
@@ -54,6 +58,7 @@ namespace SilkySeal.Kerr.Rendering
         public float OuterRadius => outerRadius;
         public bool Shifts => shifts;
         public float Opacity => opacity;
+        public float Streaks => streaks;
 
         void OnDisable()
         {

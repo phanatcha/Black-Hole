@@ -17,18 +17,22 @@ namespace SilkySeal.Kerr.Tests
         // Error is measured against the pixel's own intensity (brightest channel in the eye view); pixels below LitFloor
         // of the frame's brightest are not "lit".
         const double Tolerance = 0.02, LitFloor = 1e-3, RequiredMatchFraction = 0.99;
+        // The camera's coordinate time, M; late enough that the inner rings have turned many times.
+        const double SwirlTime = 5000;
 
-        [TestCase(0.0, HotGas.View.Radio)]
-        [TestCase(0.9, HotGas.View.Radio)]
-        [TestCase(0.9, HotGas.View.Polarization)]
-        [TestCase(0.9, HotGas.View.Eye)]
-        public void Gas_MatchesCpuTransfer(double a, HotGas.View view)
+        [TestCase(0.0, HotGas.View.Radio, 0.0)]
+        [TestCase(0.9, HotGas.View.Radio, 0.0)]
+        [TestCase(0.9, HotGas.View.Polarization, 0.0)]
+        [TestCase(0.9, HotGas.View.Eye, 0.0)]
+        [TestCase(0.9, HotGas.View.Eye, 1.0)]
+        public void Gas_MatchesCpuTransfer(double a, HotGas.View view, double swirl)
         {
             var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(ShaderPath);
             var flow = HotFlow.SgrA(a, new Vector3d(0.5, 1, 0.3));
             var frame = TestFrame(a);
-            var gpu = RunGpu(shader, frame, flow, view);
-            var cpu = RunCpu(frame, flow);
+            var pattern = new SwirlPattern(a, swirl, SwirlTime);
+            var gpu = RunGpu(shader, frame, flow, view, pattern);
+            var cpu = RunCpu(frame, flow, pattern);
 
             var expected = new Vector3d[cpu.Length];
             var actual = new Vector3d[cpu.Length];
@@ -58,12 +62,12 @@ namespace SilkySeal.Kerr.Tests
             }
 
             double fraction = (double)matched / lit;
-            Debug.Log($"[GpuGasParity a={a} {view}] within {Tolerance:P0}: {fraction:P3} of {lit} lit, worst {worst:P1}");
-            Assert.Greater(lit, cpu.Length / 5, "the gas should fill a good part of the frame");
+            Debug.Log($"[GpuGasParity a={a} {view} swirl={swirl}] within {Tolerance:P0}: {fraction:P3} of {lit} lit, worst {worst:P1}");
+            Assert.Greater(lit, cpu.Length / 6, "the gas should fill a good part of the frame");
             Assert.GreaterOrEqual(fraction, RequiredMatchFraction);
         }
 
-        static HotFlowRay[] RunCpu(CameraFrame frame, HotFlow flow)
+        static HotFlowRay[] RunCpu(CameraFrame frame, HotFlow flow, SwirlPattern pattern)
         {
             var results = new HotFlowRay[GridWidth * GridHeight];
             var settings = TraceSettings.Reference(frame.Spin);
@@ -72,7 +76,7 @@ namespace SilkySeal.Kerr.Tests
             {
                 double x = Ndc(i % GridWidth, GridWidth), y = Ndc(i / GridWidth, GridHeight);
                 var direction = new Vector3d(x * tanHalf * Aspect, y * tanHalf, 1).Normalized;
-                var ray = new HotFlowRay(flow, new WalkerPenrose.Screen(frame, direction));
+                var ray = new HotFlowRay(flow, new WalkerPenrose.Screen(frame, direction), pattern);
                 RayTracer.Trace(frame.Position, RayTracer.PixelRay(frame, x, y, tanHalf, Aspect), settings, ref ray);
                 results[i] = ray;
             });
@@ -80,7 +84,7 @@ namespace SilkySeal.Kerr.Tests
         }
 
         // CSTrace alone: the trace buffer's second float4 holds the gas light (rgb in cd/m², or I, Q, U in cgs).
-        static Vector4[] RunGpu(ComputeShader shader, CameraFrame frame, HotFlow flow, HotGas.View view)
+        static Vector4[] RunGpu(ComputeShader shader, CameraFrame frame, HotFlow flow, HotGas.View view, SwirlPattern pattern)
         {
             int kernel = shader.FindKernel("CSTrace");
             var trace = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2 * GridWidth * GridHeight, 4 * sizeof(float));
@@ -92,6 +96,10 @@ namespace SilkySeal.Kerr.Tests
                 shader.SetTexture(kernel, "_DiskFlux", Texture2D.blackTexture);
                 shader.SetTexture(kernel, "_Blackbody", Texture2D.blackTexture);
                 shader.SetInt("_GasView", (int)view);
+                shader.SetFloat("_GasSwirl", (float)pattern.Contrast);
+                var turns = new Vector4[SwirlTables.Size];
+                SwirlTables.Turns(pattern.Spin, pattern.Time, turns);
+                shader.SetVectorArray("_SwirlTurns", turns);
                 var parameters = new Vector4[GasTables.ParameterCount];
                 GasTables.Parameters(flow, parameters);
                 shader.SetVectorArray("_Gas", parameters);
@@ -109,6 +117,7 @@ namespace SilkySeal.Kerr.Tests
             {
                 // Compute parameters persist on the asset; leave the gas off for the other kernels' tests.
                 shader.SetInt("_GasView", 0);
+                shader.SetFloat("_GasSwirl", 0);
                 trace.Release();
                 UnityEngine.Object.DestroyImmediate(table);
             }

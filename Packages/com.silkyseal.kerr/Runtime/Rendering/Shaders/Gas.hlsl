@@ -2,6 +2,7 @@
 #define SILKYSEAL_KERR_GAS_HLSL
 
 #include "KerrSchild.hlsl"
+#include "Swirl.hlsl"
 
 // Float mirror of HotFlow, Synchrotron, RadiativeTransfer, WalkerPenrose and HotFlowRay in Runtime/Core; the power-law
 // integrals come from a table GasTables.cs bakes from the Core function. GpuGasParityTests compares the two.
@@ -17,6 +18,7 @@
 #define KERR_GAS_HORIZON_MARGIN 1e-3   // RayTracer.HorizonMargin
 
 int _GasView;
+float _GasSwirl; // SwirlPattern contrast; 0 leaves the flow smooth
 // GasTables.Parameters: [0] (n_th⁰, n_nth⁰, nonthermal slope, T_e⁰); [1] (r_isco, E_isco, L_isco, cm per M);
 // [2] field mix (radial, toroidal, vertical); [3] frequencies in GHz (blue, green, red, radio);
 // [4..6] VisibleBand rows; [7] power-law table (ln x_min, 1 / ln(x_max / x_min), slope below x_min).
@@ -195,7 +197,7 @@ struct KerrGasRay
     KerrGasSample last;
 };
 
-KerrGasSample KerrGasEmit(float4 screen, float3 x, float4 k, float r, float a)
+KerrGasSample KerrGasEmit(float4 screen, float3 x, float4 k, float r, float a, float time)
 {
     KerrGasSample s = (KerrGasSample)0;
     if (r >= KERR_GAS_OUTER_RADIUS || r <= KerrHorizonRadius(a) + KERR_GAS_HORIZON_MARGIN) return s;
@@ -209,6 +211,10 @@ KerrGasSample KerrGasEmit(float4 screen, float3 x, float4 k, float r, float a)
     float cosB = KerrDot(k, b, x, a) / shift, sinB = sqrt(max(0.0, 1.0 - cosB * cosB));
     float kelvin = _Gas[0].w * pow(r, -0.84), theta = kelvin / 5.9298e9;
     float gauss = sqrt(6.2969146e-4 * thermal / r); // B²/8π = n m_p c² / (6 r β), β = 10
+    // The streaks thin and thicken the electrons where they were when this light left; the field stays smooth.
+    float streaks = KerrSwirl(_GasSwirl, KERR_SWIRL_GAS_COARSENESS, r, atan2(x.y, x.x), x.z, time, a);
+    thermal *= streaks;
+    nonthermal *= streaks;
     float g2 = 1.0 / (shift * shift);
     float jI, jQ, thermalI;
 
@@ -244,12 +250,12 @@ float KerrSelfShielding(float depth)
 
 // One point of the ray: caps the next step inside the flow, then adds the trapezoid over the step just taken
 // (h = 0 at the camera only samples). transmittance is shared with the disk and sky in the eye view.
-void KerrGasStep(inout KerrGasRay g, float3 x, float4 p, float a, float h, inout float next, inout float transmittance)
+void KerrGasStep(inout KerrGasRay g, float3 x, float time, float4 p, float a, float h, inout float next, inout float transmittance)
 {
     float r = KerrRadius(x, a);
     float4 k = KerrRaise(p, x, a);
     next = min(next, max(KERR_GAS_STEP_FRACTION * r, r - KERR_GAS_OUTER_RADIUS) / length(k.xyz));
-    KerrGasSample s = KerrGasEmit(g.screen, x, k, r, a);
+    KerrGasSample s = KerrGasEmit(g.screen, x, k, r, a, time);
     if (h > 0.0)
     {
         float path = h * _Gas[1].w; // cm

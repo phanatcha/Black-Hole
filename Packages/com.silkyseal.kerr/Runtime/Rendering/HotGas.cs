@@ -31,8 +31,12 @@ namespace SilkySeal.Kerr.Rendering
                  "blurred Sgr A* ring peaks near 10¹⁰ K; the unblurred model reaches a few 10¹⁰ K.")]
         [SerializeField, Min(1e6f)] float whiteKelvin = 6e10f;
 
+        [Tooltip("Contrast of the clumps that orbit with the gas, each ring at its own Kepler rate. 0 is the smooth model.")]
+        [SerializeField, Range(0, 1)] float clumps = 1;
+
         public View CurrentView => view;
         public float WhiteKelvin => whiteKelvin;
+        public float Clumps => clumps;
 
         /// <summary>The flow around a hole of this spin.</summary>
         public HotFlow Flow(double spin) => HotFlow.SgrA(spin, new Vector3d(fieldMix.x, fieldMix.y, fieldMix.z));

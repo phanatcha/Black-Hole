@@ -24,6 +24,36 @@ namespace SilkySeal.Kerr.Tests
         }
 
         [Test]
+        public void SwirlPattern_ScalesTheLight_AsItWasWhenTheLightLeft()
+        {
+            var disk = ThinDisk.FromPeakTemperature(0, 30, 6000);
+            var swirl = new SwirlPattern(0, 1, 2000);
+            var smooth = new ThinDiskRay(disk, 1, true);
+            var streaky = new FirstCrossingTime { Disk = new ThinDiskRay(disk, 1, true, swirl), Time = double.NaN };
+            TraceMeridional(10, ref smooth);
+            TraceMeridional(10, ref streaky);
+
+            // The ray lies in the y = 0 plane and meets the disk at x > 0, so φ = 0.
+            double r = streaky.Disk.FirstHitRadius, seen = swirl.Value(r, 0, 0, streaky.Time);
+            Assert.Greater(Math.Abs(seen - swirl.Value(r, 0, 0, 0)), 0.01, "the delay should matter here");
+            AssertRadiance(smooth.Radiance * seen, streaky.Disk.Radiance);
+        }
+
+        struct FirstCrossingTime : IRayObserver
+        {
+            public ThinDiskRay Disk;
+            public double Time;
+
+            public bool OnEquatorCrossing(Vector3d x, double time, double kt, double kPhi)
+            {
+                if (double.IsNaN(Time)) Time = time;
+                return Disk.OnEquatorCrossing(x, time, kt, kPhi);
+            }
+
+            public bool OnStep(Vector3d x, double time, Vector4d p, double h, ref double nextStep) => true;
+        }
+
+        [Test]
         public void TranslucentDisk_LetsTheRayThroughAtReducedWeight()
         {
             var disk = ThinDisk.FromPeakTemperature(0, 30, 6000);
@@ -97,7 +127,7 @@ namespace SilkySeal.Kerr.Tests
         }
 
         // A Schwarzschild ray from a static camera on the +z axis, aimed at (aim, 0, 0) on the equator.
-        static RayResult TraceMeridional(double aim, ref ThinDiskRay observer)
+        static RayResult TraceMeridional<T>(double aim, ref T observer) where T : struct, IRayObserver
         {
             var pos = new Vector3d(0, 0, CameraHeight);
             var frame = ObserverFrame.Build(pos, 0, (new Vector3d(aim, 0, 0) - pos).Normalized,

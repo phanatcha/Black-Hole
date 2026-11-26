@@ -21,6 +21,13 @@ namespace SilkySeal.Kerr.Tests
         public void TearDown() => Object.DestroyImmediate(_go);
 
         [Test]
+        public void CoordinateTime_RunsAtTheSpeedOfLightInM()
+        {
+            // Defaults: light covers 30 units a second and an M is 1 unit, so 2 s is 60 M.
+            Assert.AreEqual(60, _hole.CoordinateTime(2), 1e-9);
+        }
+
+        [Test]
         public void Active_TracksEnableAndDisable()
         {
             CollectionAssert.Contains(BlackHole.Active, _hole);

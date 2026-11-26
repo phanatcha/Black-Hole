@@ -45,6 +45,11 @@ The code is written for this package. These are the methods it implements.
 - Polarization carried along the ray: Walker & Penrose 1970, Commun. Math. Phys. 18, 265; Himwich, Johnson, Lupsasca &
   Strominger 2020, Phys. Rev. D 101, 084020.
 - Radio false colour: matplotlib's afmhot colour map (Hunter 2007, Comput. Sci. Eng. 9, 90), the one EHT images use.
+- Orbiting streaks: the "swirl space" Voronoi pattern described in the r/GraphicsProgramming post *WIP Kerr Black Hole
+  render engine written in VEX*, https://www.reddit.com/r/GraphicsProgramming/comments/175lwfv/. Written here from the
+  post's description; its code was not used.
+- Gradient noise: Perlin 2002, *Improving Noise*, ACM Trans. Graph. 21(3), 681. Integer hash: O'Neill 2014, *PCG*,
+  Harvey Mudd College HMC-CS-2014-0905, as chosen by Jarzynski & Olano 2020, J. Comput. Graph. Tech. 9(3), 21.
 
 The tests check the renderer against these:
 

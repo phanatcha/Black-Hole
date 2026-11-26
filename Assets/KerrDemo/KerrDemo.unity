@@ -538,6 +538,7 @@ MonoBehaviour:
   outerRadius: 30
   shifts: 1
   opacity: 1
+  streaks: 1
 --- !u!114 &1914402831
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -553,6 +554,7 @@ MonoBehaviour:
   view: 2
   fieldMix: {x: 0, y: 1, z: 0}
   whiteKelvin: 6e+10
+  clumps: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

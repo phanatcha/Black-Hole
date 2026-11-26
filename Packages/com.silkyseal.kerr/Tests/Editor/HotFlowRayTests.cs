@@ -74,6 +74,37 @@ namespace SilkySeal.Kerr.Tests
             im /= total;
         }
 
+        [Test]
+        public void SwirlPattern_ScalesTheGasDensity_AsItWasWhenTheLightLeft()
+        {
+            const double a = 0.9, time = -40;
+            var flow = HotFlow.SgrA(a, new Vector3d(0.5, 1, 0.3));
+            var swirl = new SwirlPattern(a, 1, 3000);
+            var x = new Vector3d(6, 3, 1);
+            var here = ObserverFrame.Build(x, a, -x.Normalized, new Vector3d(0, 0, 1), new Vector3d(1, 0, 0), default, 0);
+            var p = RayTracer.PixelRay(here, 0, 0, 1, 1);
+            var screen = new WalkerPenrose.Screen(here, new Vector3d(0, 0, 1));
+            var smooth = new HotFlowRay(flow, screen);
+            var streaky = new HotFlowRay(flow, screen, swirl);
+            Slab(ref smooth, x, p, time);
+            Slab(ref streaky, x, p, time);
+
+            // The slab is optically thin, so its light follows the electrons' density, patterned in the gas's coarse cells.
+            var clumps = new SwirlPattern(a, 1, 3000, SwirlPattern.GasCoarseness);
+            double expected = clumps.Value(KerrSchild.Radius(x, a), Math.Atan2(x.Y, x.X), x.Z, time);
+            Assert.Greater(Math.Abs(expected - 1), 0.05, "pick a point where the pattern shows");
+            Assert.AreEqual(expected, streaky.Radio / smooth.Radio, 1e-4);
+            Assert.AreEqual(expected, streaky.Visible.Y / smooth.Visible.Y, 1e-4);
+        }
+
+        // A slab 1e-6 M thick at x: one sample, then a step that ends where it began.
+        static void Slab(ref HotFlowRay ray, Vector3d x, Vector4d p, double time)
+        {
+            double next = 1;
+            ray.OnStep(x, time, p, 0, ref next);
+            ray.OnStep(x, time, p, 1e-6, ref next);
+        }
+
         // The ray through screen point (α, β) in M, right and up, at the camera's distance.
         internal static HotFlowRay Trace(in HotFlow flow, in CameraFrame frame, double alpha, double beta)
         {

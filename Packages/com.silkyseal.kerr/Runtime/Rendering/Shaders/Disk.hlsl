@@ -2,6 +2,7 @@
 #define SILKYSEAL_KERR_DISK_HLSL
 
 #include "KerrSchild.hlsl"
+#include "Swirl.hlsl"
 
 // Float mirror of Runtime/Core/ThinDiskRay.cs and CircularOrbit.Shift; temperature and colour come from the tables
 // DiskTables.cs bakes from the exact Core functions. GpuDiskParityTests compares the two pixel by pixel.
@@ -12,6 +13,7 @@
 int _DiskEnabled;
 int _DiskShifts;
 float _DiskOpacity;
+float _DiskSwirl;          // SwirlPattern contrast; 0 leaves the disk smooth
 float4 _DiskRange;        // (r_in, 1 / ln(r_out / r_in), r_out, T_peak in K)
 float4 _BlackbodyRange;   // (ln T_min, 1 / (ln T_max − ln T_min))
 Texture2D<float> _DiskFlux;    // (T / T_peak)⁴ over ln r
@@ -49,7 +51,7 @@ float3 KerrBlackbody(float kelvin)
 
 // One pass of the ray through z = 0 at x, with the ray's conserved k_t and k_φ = x k_y − y k_x.
 // Composites front to back; returns false once the disk has blocked everything behind it.
-bool KerrDiskCrossing(float3 x, float kt, float kPhi, float a, inout float3 radiance, inout float transmittance)
+bool KerrDiskCrossing(float3 x, float time, float kt, float kPhi, float a, inout float3 radiance, inout float transmittance)
 {
     float r = KerrRadius(x, a);
     if (r < _DiskRange.x || r > _DiskRange.z) return true;
@@ -64,7 +66,8 @@ bool KerrDiskCrossing(float3 x, float kt, float kPhi, float a, inout float3 radi
         float ut = (r * sr + a) / (sqrt(sr) * sr * sqrt(r * sr - 3.0 * sr + 2.0 * a));
         kelvin /= ut * (kt + kPhi / (r * sr + a));
     }
-    radiance += transmittance * _DiskOpacity * KerrBlackbody(kelvin);
+    // The streaks are where the gas was when this light left it, time after the camera's moment.
+    radiance += transmittance * _DiskOpacity * KerrSwirl(_DiskSwirl, 1, r, atan2(x.y, x.x), 0.0, time, a) * KerrBlackbody(kelvin);
     transmittance *= 1.0 - _DiskOpacity;
     return transmittance >= KERR_OPAQUE_TRANSMITTANCE;
 }

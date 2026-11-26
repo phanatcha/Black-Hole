@@ -30,13 +30,17 @@ namespace SilkySeal.Kerr
 
         readonly HotFlow _flow;
         readonly WalkerPenrose.Screen _screen;
+        readonly SwirlPattern _swirl;
         readonly double _centimetres, _innerRadius;
         Sample _last;
 
-        public HotFlowRay(in HotFlow flow, in WalkerPenrose.Screen screen)
+        /// <param name="swirl">Clumps in the electrons' density, drawn at <see cref="SwirlPattern.GasCoarseness"/> whatever
+        /// swirl's own coarseness; the default leaves the flow smooth.</param>
+        public HotFlowRay(in HotFlow flow, in WalkerPenrose.Screen screen, SwirlPattern swirl = default)
         {
             _flow = flow;
             _screen = screen;
+            _swirl = new SwirlPattern(swirl.Spin, swirl.Contrast, swirl.Time, SwirlPattern.GasCoarseness);
             _centimetres = flow.LengthScale;
             _innerRadius = KerrSchild.HorizonRadius(flow.Spin) + RayTracer.HorizonMargin;
             _last = default;
@@ -46,16 +50,16 @@ namespace SilkySeal.Kerr
             VisibleTransmittance = new Vector3d(1, 1, 1);
         }
 
-        public bool OnEquatorCrossing(Vector3d x, double kt, double kPhi) => true;
+        public bool OnEquatorCrossing(Vector3d x, double time, double kt, double kPhi) => true;
 
-        public bool OnStep(Vector3d x, Vector4d p, double h, ref double nextStep)
+        public bool OnStep(Vector3d x, double time, Vector4d p, double h, ref double nextStep)
         {
             double a = _flow.Spin, r = KerrSchild.Radius(x, a);
             var k = KerrSchild.Raise(p, x, a);
             // Outside the flow a step may only reach its edge; inside, a fixed fraction of r.
             nextStep = Math.Min(nextStep, Math.Max(StepFraction * r, r - HotFlow.OuterRadius) / k.Spatial.Length);
 
-            var sample = Emit(x, k, r);
+            var sample = Emit(x, k, r, time);
             if (h > 0) Accumulate(_last, sample, h * _centimetres);
             _last = sample;
             return true;
@@ -68,7 +72,7 @@ namespace SilkySeal.Kerr
             public double Blue, Green, Red, BlueAbsorption, GreenAbsorption, RedAbsorption;
         }
 
-        Sample Emit(Vector3d x, Vector4d k, double r)
+        Sample Emit(Vector3d x, Vector4d k, double r, double time)
         {
             var s = default(Sample);
             if (r >= HotFlow.OuterRadius || r <= _innerRadius) return s;
@@ -81,8 +85,11 @@ namespace SilkySeal.Kerr
             double shift = KerrSchild.Dot(k, u, x, a); // ν in the gas over ν at the camera, 1/g
             double cos = KerrSchild.Dot(k, b, x, a) / shift, sin = Math.Sqrt(Math.Max(0, 1 - cos * cos));
             double kelvin = _flow.ElectronTemperature(r), gauss = _flow.FieldStrength(thermal, r);
+            // The streaks thin and thicken the electrons where they were when this light left. The field keeps the smooth
+            // flow's strength, so where the gas is thin the light averages to the smooth flow's.
+            double streaks = _swirl.Value(r, Math.Atan2(x.Y, x.X), x.Z, time);
 
-            var e = new Electrons(thermal, nonthermal, kelvin, gauss, sin, shift);
+            var e = new Electrons(thermal * streaks, nonthermal * streaks, kelvin, gauss, sin, shift);
             e.Emit(RadioFrequency, out s.Radio, out double polarized, out s.RadioAbsorption);
             if (polarized > 0)
             {

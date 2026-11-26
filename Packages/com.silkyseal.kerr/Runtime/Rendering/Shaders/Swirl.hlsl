@@ -1,0 +1,147 @@
+#ifndef SILKYSEAL_KERR_SWIRL_HLSL
+#define SILKYSEAL_KERR_SWIRL_HLSL
+
+// Float mirror of Runtime/Core/SwirlPattern.cs; the constants and the hash must match it. How far each ring has turned
+// at the camera's time comes from SwirlTables, worked out in double, so the pattern stays smooth however long the
+// scene runs. GpuDiskParityTests and GpuGasParityTests compare the two.
+
+#define KERR_SWIRL_RING_WIDTH 0.05
+#define KERR_SWIRL_SLOTS 24
+#define KERR_SWIRL_RINGS 128
+#define KERR_SWIRL_GAS_COARSENESS 4
+#define KERR_SWIRL_JITTER 0.8
+#define KERR_SWIRL_SHARPNESS 8.0
+#define KERR_SWIRL_WEIGHT_FLOOR 1e-3
+#define KERR_SWIRL_ACROSS 2.0
+#define KERR_SWIRL_ALONG 0.6
+#define KERR_SWIRL_CLUMP_HEIGHT 2.0
+#define KERR_SWIRL_NOISE_GAIN 1.8
+#define KERR_SWIRL_CLUMP_GAIN 0.8
+#define KERR_SWIRL_OCTAVES 3
+
+// Turns in [0, 1), four rings to a vector: the disk's rings, then the hot flow's coarser ones (SwirlTables).
+float4 _SwirlTurns[(KERR_SWIRL_RINGS + KERR_SWIRL_RINGS / KERR_SWIRL_GAS_COARSENESS) / 4];
+
+uint KerrPcg(uint v)
+{
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// Perlin's cube-edge gradient picked by hash h, dotted with the offset d from the corner.
+float KerrSwirlGrad(uint h, float3 d)
+{
+    h &= 15u;
+    float a = h < 8u ? d.x : d.y;
+    float b = h < 4u ? d.y : (h == 12u || h == 14u ? d.x : d.z);
+    return ((h & 1u) == 0u ? a : -a) + ((h & 2u) == 0u ? b : -b);
+}
+
+float KerrSwirlNoise(float3 p)
+{
+    float3 f = floor(p);
+    int3 i = (int3)f;
+    float3 t = p - f;
+    float3 s = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+    // Corner hashes Pcg(x + Pcg(y + Pcg(z))), sharing their inner terms.
+    uint x0 = (uint)i.x, x1 = x0 + 1u, z0 = KerrPcg((uint)i.z), z1 = KerrPcg((uint)i.z + 1u);
+    uint y0z0 = KerrPcg((uint)i.y + z0), y1z0 = KerrPcg((uint)i.y + 1u + z0);
+    uint y0z1 = KerrPcg((uint)i.y + z1), y1z1 = KerrPcg((uint)i.y + 1u + z1);
+    return lerp(
+        lerp(lerp(KerrSwirlGrad(KerrPcg(x0 + y0z0), t), KerrSwirlGrad(KerrPcg(x1 + y0z0), t - float3(1, 0, 0)), s.x),
+             lerp(KerrSwirlGrad(KerrPcg(x0 + y1z0), t - float3(0, 1, 0)), KerrSwirlGrad(KerrPcg(x1 + y1z0), t - float3(1, 1, 0)), s.x), s.y),
+        lerp(lerp(KerrSwirlGrad(KerrPcg(x0 + y0z1), t - float3(0, 0, 1)), KerrSwirlGrad(KerrPcg(x1 + y0z1), t - float3(1, 0, 1)), s.x),
+             lerp(KerrSwirlGrad(KerrPcg(x0 + y1z1), t - float3(0, 1, 1)), KerrSwirlGrad(KerrPcg(x1 + y1z1), t - float3(1, 1, 1)), s.x), s.y),
+        s.z);
+}
+
+float KerrSwirlFbm(float3 p, uint hash)
+{
+    p += float3(hash & 0xFFFu, (hash >> 12u) & 0xFFFu, hash >> 24u) / 16.0;
+    float sum = 0.0, amplitude = 1.0;
+    [unroll]
+    for (int i = 0; i < KERR_SWIRL_OCTAVES; i++)
+    {
+        sum += amplitude * KerrSwirlNoise(p);
+        p = 2.0 * p + float3(19.19, 7.31, 3.73);
+        amplitude *= 0.5;
+    }
+    return sum;
+}
+
+// The point's position along ring j, in cells from the ring's own zero, in [0, slots), delay after the camera's time.
+// entry: the ring's place in _SwirlTurns.
+float KerrSwirlAlong(int ring, int entry, float width, int slots, float angle, float delay, float spin)
+{
+    float r = exp((ring + 0.5) * width);
+    float turns = _SwirlTurns[entry >> 2][entry & 3] + delay / ((r * sqrt(r) + spin) * 6.28318531);
+    float along = (angle - turns) * slots;
+    return along - slots * floor(along / slots);
+}
+
+// The point relative to the seed k cells along from its own cell, in cells across and along the orbit.
+float2 KerrSwirlOffset(int ring, int slots, float along, int k, float u, out uint hash)
+{
+    int slot = (int)floor(along) + k;
+    hash = KerrPcg((uint)(ring * slots) + (uint)(slot + slots) % (uint)slots);
+    uint next = KerrPcg(hash);
+    float2 d = float2(u - (ring + 0.5 + KERR_SWIRL_JITTER * (hash * 2.32830644e-10 - 0.5)),
+                      along - (slot + 0.5 + KERR_SWIRL_JITTER * (next * 2.32830644e-10 - 0.5)));
+    hash = KerrPcg(next);
+    return d;
+}
+
+// Multiplier on the gas's brightness or density at Kerr-Schild radius r, azimuth φ = atan2(y, x) and height z, delay
+// after the camera's time; 1 when contrast is 0. coarseness: 1 for the disk, KERR_SWIRL_GAS_COARSENESS for the flow.
+float KerrSwirl(float contrast, int coarseness, float r, float phi, float z, float delay, float spin)
+{
+    if (contrast == 0.0) return 1.0;
+    float width = KERR_SWIRL_RING_WIDTH * coarseness;
+    float u = log(r) / width, height = z / (r * width), angle = phi / 6.28318531;
+    int first = (int)floor(u) - 1, rings = KERR_SWIRL_RINGS / coarseness, slots = KERR_SWIRL_SLOTS / coarseness;
+    int table = coarseness == 1 ? 0 : KERR_SWIRL_RINGS;
+
+    // Two passes over the 3 × 3 cells around the point: the nearest seed, then the weighted blend.
+    float3 along = 0.0;
+    float nearest = 1e30;
+    uint hash;
+    [unroll]
+    for (int j = 0; j < 3; j++)
+    {
+        int ring = first + j;
+        int clamped = clamp(ring, 0, rings - 1);
+        along[j] = KerrSwirlAlong(clamped, table + clamped, width, slots, angle, delay, spin);
+        if (ring < 0 || ring >= rings) continue;
+        [unroll]
+        for (int k = -1; k <= 1; k++)
+        {
+            float2 d = KerrSwirlOffset(ring, slots, along[j], k, u, hash);
+            nearest = min(nearest, dot(d, d));
+        }
+    }
+    if (nearest > 1e29) return 1.0;
+
+    float sum = 0.0, weights = 0.0;
+    [loop]
+    for (int j2 = 0; j2 < 3; j2++)
+    {
+        int ring = first + j2;
+        if (ring < 0 || ring >= rings) continue;
+        [loop]
+        for (int k = -1; k <= 1; k++)
+        {
+            float2 d = KerrSwirlOffset(ring, slots, along[j2], k, u, hash);
+            float w = exp(-KERR_SWIRL_SHARPNESS * (dot(d, d) - nearest));
+            if (w < KERR_SWIRL_WEIGHT_FLOOR) continue;
+            // Coarse patterns (the gas) draw one smooth value per cell; see SwirlPattern.GasCoarseness.
+            sum += w * (coarseness == 1
+                ? KERR_SWIRL_NOISE_GAIN * KerrSwirlFbm(float3(d.x * KERR_SWIRL_ACROSS, d.y * KERR_SWIRL_ALONG, height * KERR_SWIRL_ACROSS), hash)
+                : KERR_SWIRL_CLUMP_GAIN * cos(6.28318531 * (hash * 2.32830644e-10 + height / KERR_SWIRL_CLUMP_HEIGHT)));
+            weights += w;
+        }
+    }
+    return 1.0 + contrast * clamp(sum / weights, -1.0, 1.0);
+}
+
+#endif

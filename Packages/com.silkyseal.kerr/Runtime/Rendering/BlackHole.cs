@@ -45,6 +45,12 @@ namespace SilkySeal.Kerr.Rendering
         public double Spin => spin;
         public float UnitsPerM => unitsPerM;
         public float SpeedOfLight => speedOfLight;
+
+        /// <summary>
+        /// Kerr-Schild coordinate time in M after this many seconds. shortcut: treats scene time as the distant
+        /// observers' time, which drifts from a deep or fast camera's own; use the camera's worldline once it plunges.
+        /// </summary>
+        public double CoordinateTime(double seconds) => seconds * speedOfLight / unitsPerM;
         public Cubemap Sky => sky;
         public TextAsset Stars => stars;
         public float SkyLuminance => skyLuminance;

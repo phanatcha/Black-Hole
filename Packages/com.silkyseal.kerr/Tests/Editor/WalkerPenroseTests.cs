@@ -105,9 +105,9 @@ namespace SilkySeal.Kerr.Tests
             public Vector4d P;
             public bool Done;
 
-            public bool OnEquatorCrossing(Vector3d x, double kt, double kPhi) => true;
+            public bool OnEquatorCrossing(Vector3d x, double time, double kt, double kPhi) => true;
 
-            public bool OnStep(Vector3d x, Vector4d p, double h, ref double nextStep)
+            public bool OnStep(Vector3d x, double time, Vector4d p, double h, ref double nextStep)
             {
                 if (KerrSchild.Radius(x, 0.9) >= 6) return true;
                 X = x;
