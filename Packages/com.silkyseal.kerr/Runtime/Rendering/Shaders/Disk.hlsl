@@ -12,6 +12,7 @@
 
 int _DiskEnabled;
 int _DiskShifts;
+int _BlueStreams;
 float _DiskOpacity;
 float _DiskSwirl;          // SwirlPattern contrast; 0 leaves the disk smooth
 float4 _DiskRange;        // (r_in, 1 / ln(r_out / r_in), r_out, T_peak in K)
@@ -67,7 +68,13 @@ bool KerrDiskCrossing(float3 x, float time, float kt, float kPhi, float a, inout
         kelvin /= ut * (kt + kPhi / (r * sr + a));
     }
     // The streaks are where the gas was when this light left it, time after the camera's moment.
-    radiance += transmittance * _DiskOpacity * KerrSwirl(_DiskSwirl, 1, r, atan2(x.y, x.x), 0.0, time, a) * KerrBlackbody(kelvin);
+    bool broad = _BlueStreams != 0;
+    float3 emission = KerrBlackbody(kelvin);
+    // Keep the shifted blue-band intensity. The partially obscured, compressed arcs need less fine contrast.
+    if (broad) emission = max(0.0, emission.b) * float3(0.18, 0.47, 1.0);
+    float contrast = broad ? _DiskSwirl * pow(transmittance, 4.0) : _DiskSwirl;
+    float streaks = KerrSwirl(contrast, broad ? KERR_SWIRL_GAS_COARSENESS : 1, r, atan2(x.y, x.x), 0.0, time, a, broad);
+    radiance += transmittance * _DiskOpacity * streaks * emission;
     transmittance *= 1.0 - _DiskOpacity;
     return transmittance >= KERR_OPAQUE_TRANSMITTANCE;
 }

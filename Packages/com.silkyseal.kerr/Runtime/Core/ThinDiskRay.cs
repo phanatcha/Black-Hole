@@ -46,7 +46,13 @@ namespace SilkySeal.Kerr
             // are where the gas was when this light left it.
             double g = _shifts ? CircularOrbit.Shift(x, kt, kPhi, a) : 1;
             double streaks = _swirl.Value(r, Math.Atan2(x.Y, x.X), 0, time);
-            Radiance += Blackbody.LinearSrgb(g * t) * (Transmittance * _opacity * streaks);
+            var emission = Blackbody.LinearSrgb(g * t);
+            if (_swirl.BroadStreams)
+            {
+                emission = new Vector3d(0.18, 0.47, 1.0) * Math.Max(0, emission.Z);
+                streaks = 1 + (streaks - 1) * Math.Pow(Transmittance, 4);
+            }
+            Radiance += emission * (Transmittance * _opacity * streaks);
             Transmittance *= 1 - _opacity;
             if (double.IsNaN(FirstHitRadius)) FirstHitRadius = r;
             return Transmittance >= OpaqueTransmittance;

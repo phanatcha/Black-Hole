@@ -22,6 +22,10 @@ namespace SilkySeal.Kerr.Rendering
             PeakTemperature,
         }
 
+        [Tooltip("Use broad orbiting streams and map the disk's blue-band emission to an ice-blue palette.")]
+        [SerializeField] bool blueStreams;
+        public bool BlueStreams => blueStreams;
+
         [SerializeField] TemperatureSource temperatureSource = TemperatureSource.MassAndAccretion;
 
         [Tooltip("Mass in solar masses. Heavier holes have cooler disks: T ∝ M^-1/4 at a fixed Eddington ratio.")]
@@ -92,6 +96,7 @@ namespace SilkySeal.Kerr.Rendering
         internal void ApplyRealisticPreset()
         {
             RecordUndo("Realistic disk");
+            blueStreams = false;
             temperatureSource = TemperatureSource.MassAndAccretion;
             massSolar = 1e8f;
             eddingtonRatio = 0.1f;
@@ -108,6 +113,7 @@ namespace SilkySeal.Kerr.Rendering
         internal void ApplyInterstellarPreset()
         {
             RecordUndo("Interstellar disk");
+            blueStreams = false;
             if (_hole == null) _hole = GetComponent<BlackHole>();
             _hole.SetSpin(0.6f);
             temperatureSource = TemperatureSource.PeakTemperature;

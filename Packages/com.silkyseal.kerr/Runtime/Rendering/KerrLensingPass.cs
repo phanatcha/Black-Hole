@@ -70,6 +70,7 @@ namespace SilkySeal.Kerr.Rendering
         static readonly int s_Gas = Shader.PropertyToID("_Gas");
         static readonly int s_GasPowerLaw = Shader.PropertyToID("_GasPowerLaw");
         static readonly int s_GasScale = Shader.PropertyToID("_GasScale");
+        static readonly int s_BlueStreams = Shader.PropertyToID("_BlueStreams");
         static readonly int s_DiskSwirl = Shader.PropertyToID("_DiskSwirl");
         static readonly int s_GasSwirl = Shader.PropertyToID("_GasSwirl");
         static readonly int s_SwirlTurns = Shader.PropertyToID("_SwirlTurns");
@@ -85,7 +86,7 @@ namespace SilkySeal.Kerr.Rendering
             public Matrix4x4 holeToWorld;
             public float spin, tanHalfFovY, aspect, farRadius, useSky, skyLuminance, diskOpacity, gasScale, diskSwirl, gasSwirl;
             public float manualEV100, exposureCompensation, deltaTime, adaptationSpeed;
-            public int blackout, diskEnabled, diskShifts, autoExposure, meterCount, starSize, starLevels, gasView;
+            public int blackout, diskEnabled, diskShifts, blueStreams, autoExposure, meterCount, starSize, starLevels, gasView;
             public readonly int[] size = new int[2];
             public readonly Vector4[] gas = new Vector4[GasTables.ParameterCount];
             public readonly Vector4[] swirlTurns = new Vector4[SwirlTables.Size];
@@ -234,6 +235,7 @@ namespace SilkySeal.Kerr.Rendering
             d.diskShifts = _disk != null && _disk.Shifts ? 1 : 0;
             d.diskOpacity = _disk != null ? _disk.Opacity : 0;
             d.diskRange = _diskRange;
+            d.blueStreams = _disk != null && _disk.BlueStreams ? 1 : 0;
             d.diskSwirl = _disk != null ? _disk.Streaks : 0;
             d.gasSwirl = _gas != null ? _gas.Clumps : 0;
             // Scene time stands still outside Play mode; the wall clock keeps the disk turning in the editor.
@@ -262,6 +264,7 @@ namespace SilkySeal.Kerr.Rendering
             cmd.SetComputeIntParam(d.shader, s_DiskShifts, d.diskShifts);
             cmd.SetComputeFloatParam(d.shader, s_DiskOpacity, d.diskOpacity);
             cmd.SetComputeVectorParam(d.shader, s_DiskRange, d.diskRange);
+            cmd.SetComputeIntParam(d.shader, s_BlueStreams, d.blueStreams);
             cmd.SetComputeFloatParam(d.shader, s_DiskSwirl, d.diskSwirl);
             cmd.SetComputeFloatParam(d.shader, s_GasSwirl, d.gasSwirl);
             cmd.SetComputeVectorArrayParam(d.shader, s_SwirlTurns, d.swirlTurns);

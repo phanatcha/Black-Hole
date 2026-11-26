@@ -41,17 +41,20 @@ namespace SilkySeal.Kerr
         public readonly double Spin, Contrast, Time;
         /// <summary>Cells this many times larger across and along than the disk's, and as many times fewer rings.</summary>
         public readonly int Coarseness;
+        public readonly bool BroadStreams;
 
         /// <param name="spin">Sets each ring's Kepler rate.</param>
         /// <param name="contrast">0 leaves the gas smooth; 1 runs from black lanes to twice the mean.</param>
         /// <param name="time">Kerr-Schild coordinate time at the camera, M.</param>
         /// <param name="coarseness">1 for the disk, <see cref="GasCoarseness"/> for the hot flow; must divide <see cref="Slots"/>.</param>
-        public SwirlPattern(double spin, double contrast, double time, int coarseness = 1)
+        /// <param name="broadStreams">Use the coarse orbit grid for sheared disk streams instead of fine strands.</param>
+        public SwirlPattern(double spin, double contrast, double time, int coarseness = 1, bool broadStreams = false)
         {
             Spin = spin;
             Contrast = contrast;
             Time = time;
-            Coarseness = coarseness;
+            BroadStreams = broadStreams;
+            Coarseness = broadStreams ? GasCoarseness : coarseness;
         }
 
         /// <summary>Radius of ring j's centre line, where its Kepler rate is taken.</summary>
@@ -97,9 +100,14 @@ namespace SilkySeal.Kerr
                     Offset(ring, slots, along, k, u, out double du, out double dv, out uint hash);
                     double w = Math.Exp(-Sharpness * (du * du + dv * dv - nearest));
                     if (w < WeightFloor) continue;
-                    sum += w * (Coarseness == 1
-                        ? NoiseGain * Strands(du, dv, height, hash)
-                        : ClumpGain * Math.Cos(2 * Math.PI * (Unit(hash) + height / ClumpHeight)));
+                    double sample;
+                    if (BroadStreams)
+                        sample = 1.65 * Fbm(1.25 * du + 0.35 * dv, 0.55 * dv, 0, hash, 2);
+                    else if (Coarseness == 1)
+                        sample = NoiseGain * Strands(du, dv, height, hash);
+                    else
+                        sample = ClumpGain * Math.Cos(2 * Math.PI * (Unit(hash) + height / ClumpHeight));
+                    sum += w * sample;
                     weights += w;
                 }
             }
@@ -138,13 +146,13 @@ namespace SilkySeal.Kerr
         }
 
         // Improved gradient noise (Perlin 2002) over octaves, shifted by the seed's hash so each cell has its own patch.
-        static double Fbm(double x, double y, double z, uint hash)
+        static double Fbm(double x, double y, double z, uint hash, int octaves = Octaves)
         {
             x += (hash & 0xFFF) / 16.0;
             y += ((hash >> 12) & 0xFFF) / 16.0;
             z += (hash >> 24) / 16.0;
             double sum = 0, amplitude = 1;
-            for (int i = 0; i < Octaves; i++)
+            for (int i = 0; i < octaves; i++)
             {
                 sum += amplitude * Noise(x, y, z);
                 x = 2 * x + 19.19;

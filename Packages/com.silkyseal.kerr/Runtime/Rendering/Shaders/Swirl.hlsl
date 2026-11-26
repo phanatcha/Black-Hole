@@ -66,12 +66,12 @@ float KerrSwirlNoise(float3 p)
         s.z);
 }
 
-float KerrSwirlFbm(float3 p, uint hash)
+float KerrSwirlFbm(float3 p, uint hash, int octaves)
 {
     p += float3(hash & 0xFFFu, (hash >> 12u) & 0xFFFu, hash >> 24u) / 16.0;
     float sum = 0.0, amplitude = 1.0;
     [unroll]
-    for (int i = 0; i < KERR_SWIRL_OCTAVES; i++)
+    for (int i = 0; i < octaves; i++)
     {
         sum += amplitude * KerrSwirlNoise(p);
         p = 2.0 * p + float3(19.19, 7.31, 3.73);
@@ -85,7 +85,7 @@ float KerrSwirlStrands(float2 d, float height, uint hash)
 {
     float2 o = float2(hash & 0xFFFu, (hash >> 12u) & 0xFFFu) / 16.0;
     float drift = d.x + KERR_SWIRL_DRIFT * KerrSwirlNoise(float3(d.x * KERR_SWIRL_DRIFT_ACROSS + o.x + 13.1, d.y * KERR_SWIRL_DRIFT_ALONG + o.y + 3.3, 9.5));
-    float fine = KerrSwirlFbm(float3(drift * KERR_SWIRL_ACROSS, d.y * KERR_SWIRL_ALONG, height * KERR_SWIRL_ACROSS), hash);
+    float fine = KerrSwirlFbm(float3(drift * KERR_SWIRL_ACROSS, d.y * KERR_SWIRL_ALONG, height * KERR_SWIRL_ACROSS), hash, KERR_SWIRL_OCTAVES);
     float mask = smoothstep(KERR_SWIRL_RIBBON_LOW, KERR_SWIRL_RIBBON_LOW + KERR_SWIRL_RIBBON_SPAN,
         KerrSwirlNoise(float3(d.x * KERR_SWIRL_RIBBON_MASK_ACROSS + o.x + 41.3, d.y * KERR_SWIRL_RIBBON_MASK_ALONG + o.y + 17.9, 5.5)));
     float broad = KERR_SWIRL_RIBBON_GAIN * KerrSwirlNoise(float3(d.x * KERR_SWIRL_RIBBON_FREQUENCY + o.x + 7.7, d.y * KERR_SWIRL_ALONG + o.y, 0.5));
@@ -116,7 +116,7 @@ float2 KerrSwirlOffset(int ring, int slots, float along, int k, float u, out uin
 
 // Multiplier on the gas's brightness or density at Kerr-Schild radius r, azimuth φ = atan2(y, x) and height z, delay
 // after the camera's time; 1 when contrast is 0. coarseness: 1 for the disk, KERR_SWIRL_GAS_COARSENESS for the flow.
-float KerrSwirl(float contrast, int coarseness, float r, float phi, float z, float delay, float spin)
+float KerrSwirl(float contrast, int coarseness, float r, float phi, float z, float delay, float spin, bool broadStreams)
 {
     if (contrast == 0.0) return 1.0;
     float width = KERR_SWIRL_RING_WIDTH * coarseness;
@@ -156,10 +156,15 @@ float KerrSwirl(float contrast, int coarseness, float r, float phi, float z, flo
             float2 d = KerrSwirlOffset(ring, slots, along[j2], k, u, hash);
             float w = exp(-KERR_SWIRL_SHARPNESS * (dot(d, d) - nearest));
             if (w < KERR_SWIRL_WEIGHT_FLOOR) continue;
-            // Coarse patterns (the gas) draw one smooth value per cell; see SwirlPattern.GasCoarseness.
-            sum += w * (coarseness == 1
-                ? KERR_SWIRL_NOISE_GAIN * KerrSwirlStrands(d, height, hash)
-                : KERR_SWIRL_CLUMP_GAIN * cos(6.28318531 * (hash * 2.32830644e-10 + height / KERR_SWIRL_CLUMP_HEIGHT)));
+            // Broad streams use the same coarser orbit table as the gas, with two gently sheared noise octaves.
+            float value;
+            if (broadStreams)
+                value = 1.65 * KerrSwirlFbm(float3(1.25 * d.x + 0.35 * d.y, 0.55 * d.y, 0.0), hash, 2);
+            else if (coarseness == 1)
+                value = KERR_SWIRL_NOISE_GAIN * KerrSwirlStrands(d, height, hash);
+            else
+                value = KERR_SWIRL_CLUMP_GAIN * cos(6.28318531 * (hash * 2.32830644e-10 + height / KERR_SWIRL_CLUMP_HEIGHT));
+            sum += w * value;
             weights += w;
         }
     }
