@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using SilkySeal.Kerr.Rendering;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -9,7 +10,8 @@ namespace SilkySeal.Kerr.Controls
     /// The plunge, after NASA SVS 14576 (Schnittman &amp; Powell 2024). G lets go: thrust stops and the camera falls freely
     /// from its current motion. 1 and 2 jump 30 M out along the line of sight for a scripted fall that circles the hole and
     /// then plunges (1) or slingshots back out (2). R puts the camera back where it was. Mouse look keeps working; a corner
-    /// readout sets the camera's clock against the far-away one. The fall ends at the inner horizon (near the singularity
+    /// readout sets the camera's clock against the far-away one, and H hides it. X takes the disk and hot flow away so the
+    /// stars show. The fall ends at the inner horizon (near the singularity
     /// at a = 0), where known physics stops, and fades to black.
     /// </summary>
     [DisallowMultipleComponent]
@@ -27,6 +29,9 @@ namespace SilkySeal.Kerr.Controls
         readonly InputAction _plunge = Key("Plunge", "1");
         readonly InputAction _nearMiss = Key("NearMiss", "2");
         readonly InputAction _reset = Key("Reset", "r");
+        readonly InputAction _readoutToggle = Key("Readout", "h");
+        // Not D: FlyCamera strafes on WASD.
+        readonly InputAction _gasToggle = Key("Gas", "x");
 
         KerrObserver _observer;
         FlyCamera _fly;
@@ -36,6 +41,7 @@ namespace SilkySeal.Kerr.Controls
         Vector3 _homePosition;
         Quaternion _homeRotation;
         string _readout, _ending;
+        Behaviour[] _hiddenGas;
         GUIStyle _style;
 
         // Edit mode runs no Awake for this component, so the tests' calls find their neighbours on first use.
@@ -49,6 +55,8 @@ namespace SilkySeal.Kerr.Controls
             _plunge.Enable();
             _nearMiss.Enable();
             _reset.Enable();
+            _readoutToggle.Enable();
+            _gasToggle.Enable();
         }
 
         void OnDisable()
@@ -58,6 +66,8 @@ namespace SilkySeal.Kerr.Controls
             _plunge.Disable();
             _nearMiss.Disable();
             _reset.Disable();
+            _readoutToggle.Disable();
+            _gasToggle.Disable();
         }
 
         void OnDestroy()
@@ -66,6 +76,8 @@ namespace SilkySeal.Kerr.Controls
             _plunge.Dispose();
             _nearMiss.Dispose();
             _reset.Dispose();
+            _readoutToggle.Dispose();
+            _gasToggle.Dispose();
         }
 
         void Update()
@@ -74,6 +86,8 @@ namespace SilkySeal.Kerr.Controls
             else if (_plunge.WasPressedThisFrame()) StartPath(-1);
             else if (_nearMiss.WasPressedThisFrame()) StartPath(1);
             else if (_letGo.WasPressedThisFrame()) LetGo();
+            if (_readoutToggle.WasPressedThisFrame()) ToggleReadout();
+            if (_gasToggle.WasPressedThisFrame()) ToggleGas(Hole);
             Tick(Time.deltaTime);
         }
 
@@ -106,6 +120,30 @@ namespace SilkySeal.Kerr.Controls
             Observer.ClearFreeFall();
             transform.SetPositionAndRotation(_homePosition, _homeRotation);
             if (Fly != null) Fly.MovementEnabled = true;
+        }
+
+        /// <summary>Whether the clock readout shows while falling. The fade and its message show either way.</summary>
+        internal bool ReadoutVisible { get; private set; } = true;
+
+        internal void ToggleReadout() => ReadoutVisible = !ReadoutVisible;
+
+        /// <summary>
+        /// Takes away whichever of the disk and the hot flow are showing, or brings back just those. Without them the
+        /// exposure settles on starlight, which the lit gas outshines by many stops.
+        /// </summary>
+        internal void ToggleGas(BlackHole hole)
+        {
+            if (_hiddenGas != null)
+            {
+                foreach (var part in _hiddenGas) if (part != null) part.enabled = true;
+                _hiddenGas = null;
+                return;
+            }
+            if (hole == null) return;
+            hole.TryGetComponent(out AccretionDisk disk);
+            hole.TryGetComponent(out HotGas gas);
+            _hiddenGas = new Behaviour[] { disk, gas }.Where(part => part != null && part.enabled).ToArray();
+            foreach (var part in _hiddenGas) part.enabled = false;
         }
 
         internal void Tick(float dt)
@@ -167,7 +205,7 @@ namespace SilkySeal.Kerr.Controls
                 GUI.color = color;
                 GUI.Label(new Rect(16, Screen.height * 0.5f, Screen.width - 32, 40), _ending, _style);
             }
-            GUI.Label(new Rect(16, 16, 640, 80), _readout, _style);
+            if (ReadoutVisible) GUI.Label(new Rect(16, 16, 640, 80), _readout, _style);
         }
 
         static InputAction Key(string name, string key) => new InputAction(name, InputActionType.Button, "<Keyboard>/" + key);

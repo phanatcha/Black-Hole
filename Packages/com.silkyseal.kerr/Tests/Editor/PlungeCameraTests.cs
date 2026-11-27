@@ -74,6 +74,53 @@ namespace SilkySeal.Kerr.Tests
             Assert.IsTrue(_observer.IsFalling);
         }
 
+        // H hides the readout; the choice holds across a reset and a new fall.
+        [Test]
+        public void Readout_TogglesAndStaysAcrossFalls()
+        {
+            Assert.IsTrue(_plunge.ReadoutVisible);
+            _plunge.ToggleReadout();
+            _plunge.StartPath(-1);
+            _plunge.ResetFall();
+            _plunge.LetGo();
+
+            Assert.IsFalse(_plunge.ReadoutVisible);
+            _plunge.ToggleReadout();
+            Assert.IsTrue(_plunge.ReadoutVisible);
+        }
+
+        // X takes the disk and the hot flow away together, so the exposure can settle on starlight, and brings them back.
+        [Test]
+        public void ToggleGas_TurnsTheDiskAndTheFlowOffThenOn()
+        {
+            var disk = _holeObject.AddComponent<AccretionDisk>();
+            var gas = _holeObject.AddComponent<HotGas>();
+
+            _plunge.ToggleGas(_hole);
+            Assert.IsFalse(disk.enabled);
+            Assert.IsFalse(gas.enabled);
+
+            _plunge.ToggleGas(_hole);
+            Assert.IsTrue(disk.enabled);
+            Assert.IsTrue(gas.enabled);
+        }
+
+        // The demo shows the disk without the flow: bringing the gas back must not switch on what was off.
+        [Test]
+        public void ToggleGas_BringsBackOnlyWhatItTookAway()
+        {
+            var disk = _holeObject.AddComponent<AccretionDisk>();
+            var gas = _holeObject.AddComponent<HotGas>();
+            gas.enabled = false;
+
+            _plunge.ToggleGas(_hole);
+            Assert.IsFalse(disk.enabled);
+            _plunge.ToggleGas(_hole);
+
+            Assert.IsTrue(disk.enabled);
+            Assert.IsFalse(gas.enabled);
+        }
+
         // Far out the camera's clock runs at the hole's speed of light; near it, an orbit at its radius takes 10 s.
         [Test]
         public void Clock_SlowsOnlyNearTheHole()
