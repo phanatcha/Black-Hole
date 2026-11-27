@@ -13,6 +13,7 @@
 int _DiskEnabled;
 int _DiskShifts;
 int _BlueStreams;
+float _CloudTexture;
 float _DiskOpacity;
 float _DiskSwirl;          // SwirlPattern contrast; 0 leaves the disk smooth
 float4 _DiskRange;        // (r_in, 1 / ln(r_out / r_in), r_out, T_peak in K)
@@ -72,10 +73,18 @@ bool KerrDiskCrossing(float3 x, float time, float kt, float kPhi, float a, inout
     float3 emission = KerrBlackbody(kelvin);
     // Keep the shifted blue-band intensity. The partially obscured, compressed arcs need less fine contrast.
     if (broad) emission = max(0.0, emission.b) * float3(0.18, 0.47, 1.0);
-    float contrast = broad ? _DiskSwirl * pow(transmittance, 4.0) : _DiskSwirl;
-    float streaks = KerrSwirl(contrast, broad ? KERR_SWIRL_GAS_COARSENESS : 1, r, atan2(x.y, x.x), 0.0, time, a, broad);
-    radiance += transmittance * _DiskOpacity * streaks * emission;
-    transmittance *= 1.0 - _DiskOpacity;
+    float contrast = broad ? _DiskSwirl * pow(transmittance, 4.0 - 2.0 * _CloudTexture) : _DiskSwirl;
+    float streaks = KerrSwirl(contrast, broad ? KERR_SWIRL_GAS_COARSENESS : 1, r, atan2(x.y, x.x), 0.0, time, a, broad, _CloudTexture);
+    float opacity = _DiskOpacity;
+    if (broad && _CloudTexture > 0.0)
+    {
+        // Keep transparent and opaque endpoints exact. Brighter wisps obscure a little more of the far side.
+        opacity += 0.55 * _CloudTexture * opacity * (1.0 - opacity) * (streaks - 1.0);
+        float outer = smoothstep(3.0, 10.0, r / _DiskRange.x);
+        streaks *= 1.0 + 0.8 * _CloudTexture * outer * max(0.0, streaks - 1.0);
+    }
+    radiance += transmittance * opacity * streaks * emission;
+    transmittance *= 1.0 - opacity;
     return transmittance >= KERR_OPAQUE_TRANSMITTANCE;
 }
 

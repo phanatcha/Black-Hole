@@ -38,7 +38,7 @@ namespace SilkySeal.Kerr
                      RibbonFrequency = 1, RibbonGain = 0.6, RibbonStrands = 0.2;
         const int Octaves = 3;
 
-        public readonly double Spin, Contrast, Time;
+        public readonly double Spin, Contrast, Time, CloudTexture;
         /// <summary>Cells this many times larger across and along than the disk's, and as many times fewer rings.</summary>
         public readonly int Coarseness;
         public readonly bool BroadStreams;
@@ -48,12 +48,14 @@ namespace SilkySeal.Kerr
         /// <param name="time">Kerr-Schild coordinate time at the camera, M.</param>
         /// <param name="coarseness">1 for the disk, <see cref="GasCoarseness"/> for the hot flow; must divide <see cref="Slots"/>.</param>
         /// <param name="broadStreams">Use the coarse orbit grid for sheared disk streams instead of fine strands.</param>
-        public SwirlPattern(double spin, double contrast, double time, int coarseness = 1, bool broadStreams = false)
+        /// <param name="cloudTexture">Blend orbiting wisps into broad streams, from 0 (smooth) to 1.</param>
+        public SwirlPattern(double spin, double contrast, double time, int coarseness = 1, bool broadStreams = false, double cloudTexture = 0)
         {
             Spin = spin;
             Contrast = contrast;
             Time = time;
             BroadStreams = broadStreams;
+            CloudTexture = broadStreams ? Math.Max(0, Math.Min(1, cloudTexture)) : 0;
             Coarseness = broadStreams ? GasCoarseness : coarseness;
         }
 
@@ -102,7 +104,11 @@ namespace SilkySeal.Kerr
                     if (w < WeightFloor) continue;
                     double sample;
                     if (BroadStreams)
+                    {
                         sample = 1.65 * Fbm(1.25 * du + 0.35 * dv, 0.55 * dv, 0, hash, 2);
+                        if (CloudTexture > 0)
+                            sample = Lerp(CloudTexture, sample, StreamCloud(du, dv, hash, sample));
+                    }
                     else if (Coarseness == 1)
                         sample = NoiseGain * Strands(du, dv, height, hash);
                     else
@@ -143,6 +149,41 @@ namespace SilkySeal.Kerr
             t = Math.Max(0, Math.Min(1, t));
             double broad = RibbonGain * Noise(du * RibbonFrequency + x + 7.7, dv * AlongFrequency + y, 0.5);
             return Lerp(t * t * (3 - 2 * t), fine, broad + RibbonStrands * fine);
+        }
+
+        // Four hashed values per octave keep the disk's additional density samples inexpensive on the GPU.
+        static double CloudNoise(double x, double y, uint seed, int octaves)
+        {
+            double sum = 0, amplitude = 1;
+            for (int octave = 0; octave < octaves; octave++)
+            {
+                double ix = Math.Floor(x), iy = Math.Floor(y);
+                double fx = x - ix, fy = y - iy;
+                fx = fx * fx * (3 - 2 * fx);
+                fy = fy * fy * (3 - 2 * fy);
+                uint key = unchecked(seed + (uint)(int)ix + 65537u * (uint)(int)iy);
+                double low = Lerp(fx, Unit(Pcg(key)), Unit(Pcg(key + 1)));
+                double high = Lerp(fx, Unit(Pcg(key + 65537)), Unit(Pcg(key + 65538)));
+                sum += amplitude * (2 * Lerp(fy, low, high) - 1);
+                x = 2 * x + 19.19;
+                y = 2 * y + 7.31;
+                amplitude *= 0.5;
+            }
+            return sum;
+        }
+
+        // Two sheared veils share a large bend, with finer strands carried by the first veil.
+        static double StreamCloud(double du, double dv, uint hash, double envelope)
+        {
+            du *= 1.35;
+            dv *= 1.35;
+            double eddy = CloudNoise(1.25 * du, 3.2 * dv, hash ^ 0xa561u, 3);
+            double bend = 0.50 * eddy + 0.25 * envelope;
+            double across = du + 6.0 * dv + bend;
+            double veil = CloudNoise(1.65 * across, 1.9 * dv, hash ^ 0xc831u, 3);
+            double wisps = CloudNoise(5.4 * across + 1.3 * veil, 1.7 * dv + 0.5 * eddy, hash ^ 0x17efu, 3);
+            double back = CloudNoise(4.8 * (du + 1.4 * dv - bend), 2.0 * dv, hash ^ 0xf41bu, 2);
+            return 0.63 * envelope + 0.52 * veil + 0.68 * wisps + 0.48 * back;
         }
 
         // Improved gradient noise (Perlin 2002) over octaves, shifted by the seed's hash so each cell has its own patch.

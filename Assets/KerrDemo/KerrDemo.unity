@@ -546,6 +546,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: SilkySeal.Kerr.Rendering::SilkySeal.Kerr.Rendering.AccretionDisk
   blueStreams: 1
+  cloudTexture: 1
   temperatureSource: 1
   massSolar: 100000000
   eddingtonRatio: 0.1

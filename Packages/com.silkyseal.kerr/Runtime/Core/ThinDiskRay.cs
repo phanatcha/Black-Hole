@@ -47,13 +47,22 @@ namespace SilkySeal.Kerr
             double g = _shifts ? CircularOrbit.Shift(x, kt, kPhi, a) : 1;
             double streaks = _swirl.Value(r, Math.Atan2(x.Y, x.X), 0, time);
             var emission = Blackbody.LinearSrgb(g * t);
+            double opacity = _opacity;
             if (_swirl.BroadStreams)
             {
                 emission = new Vector3d(0.18, 0.47, 1.0) * Math.Max(0, emission.Z);
-                streaks = 1 + (streaks - 1) * Math.Pow(Transmittance, 4);
+                double cloud = _swirl.CloudTexture;
+                streaks = 1 + (streaks - 1) * Math.Pow(Transmittance, 4 - 2 * cloud);
+                if (cloud > 0)
+                {
+                    opacity += 0.55 * cloud * opacity * (1 - opacity) * (streaks - 1);
+                    double tOuter = Math.Max(0, Math.Min(1, (r / _disk.InnerRadius - 3) / 7));
+                    double outer = tOuter * tOuter * (3 - 2 * tOuter);
+                    streaks *= 1 + 0.8 * cloud * outer * Math.Max(0, streaks - 1);
+                }
             }
-            Radiance += emission * (Transmittance * _opacity * streaks);
-            Transmittance *= 1 - _opacity;
+            Radiance += emission * (Transmittance * opacity * streaks);
+            Transmittance *= 1 - opacity;
             if (double.IsNaN(FirstHitRadius)) FirstHitRadius = r;
             return Transmittance >= OpaqueTransmittance;
         }

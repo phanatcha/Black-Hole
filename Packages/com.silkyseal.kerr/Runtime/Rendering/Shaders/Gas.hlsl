@@ -212,7 +212,7 @@ KerrGasSample KerrGasEmit(float4 screen, float3 x, float4 k, float r, float a, f
     float kelvin = _Gas[0].w * pow(r, -0.84), theta = kelvin / 5.9298e9;
     float gauss = sqrt(6.2969146e-4 * thermal / r); // B²/8π = n m_p c² / (6 r β), β = 10
     // The streaks thin and thicken the electrons where they were when this light left; the field stays smooth.
-    float streaks = KerrSwirl(_GasSwirl, KERR_SWIRL_GAS_COARSENESS, r, atan2(x.y, x.x), x.z, time, a, false);
+    float streaks = KerrSwirl(_GasSwirl, KERR_SWIRL_GAS_COARSENESS, r, atan2(x.y, x.x), x.z, time, a, false, 0.0);
     thermal *= streaks;
     nonthermal *= streaks;
     float g2 = 1.0 / (shift * shift);

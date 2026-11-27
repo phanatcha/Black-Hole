@@ -92,6 +92,40 @@ float KerrSwirlStrands(float2 d, float height, uint hash)
     return lerp(fine, broad + KERR_SWIRL_RIBBON_STRANDS * fine, mask);
 }
 
+// Interpolate four lattice values per octave; the clouds live in a disk, so they only need 2D noise.
+float KerrCloudNoise(float2 p, uint seed, int octaves)
+{
+    float sum = 0.0;
+    float amplitude = 1.0;
+    [unroll]
+    for (int octave = 0; octave < octaves; octave++)
+    {
+        int2 cell = (int2)floor(p);
+        float2 f = frac(p);
+        f = f * f * (3.0 - 2.0 * f);
+        uint key = seed + asuint(cell.x) + 65537u * asuint(cell.y);
+        float low = lerp((float)KerrPcg(key), (float)KerrPcg(key + 1u), f.x);
+        float high = lerp((float)KerrPcg(key + 65537u), (float)KerrPcg(key + 65538u), f.x);
+        sum += amplitude * (lerp(low, high, f.y) * 4.65661287e-10 - 1.0);
+        p = p * 2.0 + float2(19.19, 7.31);
+        amplitude *= 0.5;
+    }
+    return sum;
+}
+
+// Broad envelopes turn with the original cells. A bent coordinate folds finer filaments through each envelope.
+float KerrStreamCloud(float2 d, uint hash, float envelope)
+{
+    d *= 1.35;
+    float eddy = KerrCloudNoise(float2(1.25 * d.x, 3.2 * d.y), hash ^ 0xa561u, 3);
+    float bend = 0.50 * eddy + 0.25 * envelope;
+    float across = d.x + 6.0 * d.y + bend;
+    float veil = KerrCloudNoise(float2(1.65 * across, 1.9 * d.y), hash ^ 0xc831u, 3);
+    float wisps = KerrCloudNoise(float2(5.4 * across + 1.3 * veil, 1.7 * d.y + 0.5 * eddy), hash ^ 0x17efu, 3);
+    float back = KerrCloudNoise(float2(4.8 * (d.x + 1.4 * d.y - bend), 2.0 * d.y), hash ^ 0xf41bu, 2);
+    return 0.63 * envelope + 0.52 * veil + 0.68 * wisps + 0.48 * back;
+}
+
 // The point's position along ring j, in cells from the ring's own zero, in [0, slots), delay after the camera's time.
 // entry: the ring's place in _SwirlTurns.
 float KerrSwirlAlong(int ring, int entry, float width, int slots, float angle, float delay, float spin)
@@ -116,7 +150,7 @@ float2 KerrSwirlOffset(int ring, int slots, float along, int k, float u, out uin
 
 // Multiplier on the gas's brightness or density at Kerr-Schild radius r, azimuth φ = atan2(y, x) and height z, delay
 // after the camera's time; 1 when contrast is 0. coarseness: 1 for the disk, KERR_SWIRL_GAS_COARSENESS for the flow.
-float KerrSwirl(float contrast, int coarseness, float r, float phi, float z, float delay, float spin, bool broadStreams)
+float KerrSwirl(float contrast, int coarseness, float r, float phi, float z, float delay, float spin, bool broadStreams, float cloudTexture)
 {
     if (contrast == 0.0) return 1.0;
     float width = KERR_SWIRL_RING_WIDTH * coarseness;
@@ -156,10 +190,14 @@ float KerrSwirl(float contrast, int coarseness, float r, float phi, float z, flo
             float2 d = KerrSwirlOffset(ring, slots, along[j2], k, u, hash);
             float w = exp(-KERR_SWIRL_SHARPNESS * (dot(d, d) - nearest));
             if (w < KERR_SWIRL_WEIGHT_FLOOR) continue;
-            // Broad streams use the same coarser orbit table as the gas, with two gently sheared noise octaves.
+            // Both blue looks use the same coarse orbit grid, so the wisps move with their parent stream.
             float value;
             if (broadStreams)
+            {
                 value = 1.65 * KerrSwirlFbm(float3(1.25 * d.x + 0.35 * d.y, 0.55 * d.y, 0.0), hash, 2);
+                if (cloudTexture > 0.0)
+                    value = lerp(value, KerrStreamCloud(d, hash, value), cloudTexture);
+            }
             else if (coarseness == 1)
                 value = KERR_SWIRL_NOISE_GAIN * KerrSwirlStrands(d, height, hash);
             else

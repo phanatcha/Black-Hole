@@ -23,14 +23,15 @@ namespace SilkySeal.Kerr.Tests
         [TestCase(0.9, 0.5, 0.0, false)]
         [TestCase(0.9, 1.0, 1.0, false)]
         [TestCase(0.6, 0.34, 0.75, true)]
-        public void Disk_MatchesCpuShading(double a, double opacity, double swirl, bool broadStreams)
+        [TestCase(0.6, 0.34, 0.75, true, 1.0)]
+        public void Disk_MatchesCpuShading(double a, double opacity, double swirl, bool broadStreams, double cloudTexture = 0)
         {
             var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(ShaderPath);
             var disk = ThinDisk.FromPeakTemperature(a, OuterRadius, PeakKelvin);
             var frame = TestFrame(a);
             // Exposure puts the rest-frame peak-temperature blackbody at luminance 1.
             double exposure = 1 / Blackbody.Xyz(PeakKelvin).Y;
-            var pattern = new SwirlPattern(a, swirl, SwirlTime, broadStreams: broadStreams);
+            var pattern = new SwirlPattern(a, swirl, SwirlTime, broadStreams: broadStreams, cloudTexture: cloudTexture);
             var gpu = RunGpu(shader, frame, disk, opacity, pattern, (float)exposure);
             var cpu = RunCpu(frame, disk, opacity, pattern, exposure);
 
@@ -82,6 +83,7 @@ namespace SilkySeal.Kerr.Tests
                 SetCamera(shader, frame);
                 shader.SetInt("_DiskEnabled", 1);
                 shader.SetInt("_DiskShifts", 1);
+                shader.SetFloat("_CloudTexture", (float)pattern.CloudTexture);
                 shader.SetInt("_BlueStreams", pattern.BroadStreams ? 1 : 0);
                 shader.SetInt("_GasView", 0); // the scene's own render may have left the hot gas on
                 shader.SetFloat("_DiskOpacity", (float)opacity);
@@ -108,6 +110,7 @@ namespace SilkySeal.Kerr.Tests
                 // Compute parameters persist on the asset; leave the disk off for the other kernels' tests.
                 shader.SetInt("_DiskEnabled", 0);
                 shader.SetInt("_BlueStreams", 0);
+                shader.SetFloat("_CloudTexture", 0);
                 shader.SetFloat("_DiskSwirl", 0);
                 trace.Release();
                 UnityEngine.Object.DestroyImmediate(blackbody);

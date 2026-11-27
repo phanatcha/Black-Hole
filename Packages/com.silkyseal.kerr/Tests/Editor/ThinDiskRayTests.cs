@@ -39,6 +39,31 @@ namespace SilkySeal.Kerr.Tests
             AssertRadiance(smooth.Radiance * seen, streaky.Disk.Radiance);
         }
 
+        [Test]
+        public void CloudTexture_VariesPartialOpacity_AndPreservesItsEndpoints()
+        {
+            var disk = ThinDisk.FromPeakTemperature(0, 30, 7000);
+            var clouds = new SwirlPattern(0, 0.75, 300, broadStreams: true, cloudTexture: 1);
+            double min = 1, max = 0;
+            for (int i = 0; i < 64; i++)
+            {
+                double phi = 2 * Math.PI * i / 64;
+                var x = new Vector3d(12 * Math.Cos(phi), 12 * Math.Sin(phi), 0);
+                var clear = new ThinDiskRay(disk, 0, false, clouds);
+                var veil = new ThinDiskRay(disk, 0.34, false, clouds);
+                var opaque = new ThinDiskRay(disk, 1, false, clouds);
+                clear.OnEquatorCrossing(x, 0, 1, 0);
+                veil.OnEquatorCrossing(x, 0, 1, 0);
+                opaque.OnEquatorCrossing(x, 0, 1, 0);
+                Assert.AreEqual(1, clear.Transmittance);
+                Assert.AreEqual(0, opaque.Transmittance);
+                min = Math.Min(min, veil.Transmittance);
+                max = Math.Max(max, veil.Transmittance);
+            }
+            Assert.Less(min, 1 - 0.34);
+            Assert.Greater(max, 1 - 0.34);
+        }
+
         struct FirstCrossingTime : IRayObserver
         {
             public ThinDiskRay Disk;

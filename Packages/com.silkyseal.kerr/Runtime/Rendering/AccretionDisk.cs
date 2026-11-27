@@ -26,6 +26,10 @@ namespace SilkySeal.Kerr.Rendering
         [SerializeField] bool blueStreams;
         public bool BlueStreams => blueStreams;
 
+        [Tooltip("Cloud texture within Blue Streams. Higher values add overlapping wisps and density-dependent opacity.")]
+        [SerializeField, Range(0, 1)] float cloudTexture;
+        public float CloudTexture => cloudTexture;
+
         [SerializeField] TemperatureSource temperatureSource = TemperatureSource.MassAndAccretion;
 
         [Tooltip("Mass in solar masses. Heavier holes have cooler disks: T ∝ M^-1/4 at a fixed Eddington ratio.")]
