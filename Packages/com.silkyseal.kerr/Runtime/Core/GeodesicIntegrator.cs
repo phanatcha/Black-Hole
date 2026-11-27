@@ -5,7 +5,8 @@ namespace SilkySeal.Kerr
     /// <summary>
     /// One adaptive Cash–Karp RK4(5) step of Hamilton's equations for a null geodesic:
     /// dx^i/dλ = g^{iν} p_ν, dp_i/dλ = −∂_i H. p_t is a constant of motion (stationary metric), so the
-    /// state is the six numbers (x^i, p_i). O(1), allocation-free; the GPU port mirrors it line for line.
+    /// state is the six numbers (x^i, p_i); the coordinate time t rides along without steering the step size.
+    /// O(1), allocation-free; the GPU port mirrors it line for line.
     /// </summary>
     public static class GeodesicIntegrator
     {
@@ -22,20 +23,20 @@ namespace SilkySeal.Kerr
                      E5 = -277.0 / 14336, E6 = C6 - 1.0 / 4;
 
         /// <summary>
-        /// Attempts one step of size h. On success advances x and p and returns true; either way h becomes
+        /// Attempts one step of size h. On success advances x, t and p and returns true; either way h becomes
         /// the size to try next. Error per component is |err| / (tolerance · (1 + |y|)).
         /// </summary>
-        public static bool Step(ref Vector3d x, ref Vector3d p, double pt, double a, ref double h, double tolerance)
+        public static bool Step(ref Vector3d x, ref double t, ref Vector3d p, double pt, double a, ref double h, double tolerance)
         {
-            Derivatives(x, p, pt, a, out var kx1, out var kp1);
-            Derivatives(x + h * B21 * kx1, p + h * B21 * kp1, pt, a, out var kx2, out var kp2);
-            Derivatives(x + h * (B31 * kx1 + B32 * kx2), p + h * (B31 * kp1 + B32 * kp2), pt, a, out var kx3, out var kp3);
+            Derivatives(x, p, pt, a, out var kx1, out double kt1, out var kp1);
+            Derivatives(x + h * B21 * kx1, p + h * B21 * kp1, pt, a, out var kx2, out _, out var kp2);
+            Derivatives(x + h * (B31 * kx1 + B32 * kx2), p + h * (B31 * kp1 + B32 * kp2), pt, a, out var kx3, out double kt3, out var kp3);
             Derivatives(x + h * (B41 * kx1 + B42 * kx2 + B43 * kx3),
-                        p + h * (B41 * kp1 + B42 * kp2 + B43 * kp3), pt, a, out var kx4, out var kp4);
+                        p + h * (B41 * kp1 + B42 * kp2 + B43 * kp3), pt, a, out var kx4, out double kt4, out var kp4);
             Derivatives(x + h * (B51 * kx1 + B52 * kx2 + B53 * kx3 + B54 * kx4),
-                        p + h * (B51 * kp1 + B52 * kp2 + B53 * kp3 + B54 * kp4), pt, a, out var kx5, out var kp5);
+                        p + h * (B51 * kp1 + B52 * kp2 + B53 * kp3 + B54 * kp4), pt, a, out var kx5, out _, out var kp5);
             Derivatives(x + h * (B61 * kx1 + B62 * kx2 + B63 * kx3 + B64 * kx4 + B65 * kx5),
-                        p + h * (B61 * kp1 + B62 * kp2 + B63 * kp3 + B64 * kp4 + B65 * kp5), pt, a, out var kx6, out var kp6);
+                        p + h * (B61 * kp1 + B62 * kp2 + B63 * kp3 + B64 * kp4 + B65 * kp5), pt, a, out var kx6, out double kt6, out var kp6);
 
             var ex = h * (E1 * kx1 + E3 * kx3 + E4 * kx4 + E5 * kx5 + E6 * kx6);
             var ep = h * (E1 * kp1 + E3 * kp3 + E4 * kp4 + E5 * kp5 + E6 * kp6);
@@ -45,6 +46,7 @@ namespace SilkySeal.Kerr
             if (err <= 1.0)
             {
                 x += h * (C1 * kx1 + C3 * kx3 + C4 * kx4 + C6 * kx6);
+                t += h * (C1 * kt1 + C3 * kt3 + C4 * kt4 + C6 * kt6);
                 p += h * (C1 * kp1 + C3 * kp3 + C4 * kp4 + C6 * kp6);
                 h *= err > 0 ? Math.Min(MaxGrowth, Safety * Math.Pow(err, -0.2)) : MaxGrowth;
                 return true;
@@ -53,10 +55,12 @@ namespace SilkySeal.Kerr
             return false;
         }
 
-        static void Derivatives(Vector3d x, Vector3d p, double pt, double a, out Vector3d dx, out Vector3d dp)
+        static void Derivatives(Vector3d x, Vector3d p, double pt, double a, out Vector3d dx, out double dt, out Vector3d dp)
         {
             var p4 = new Vector4d(pt, p);
-            dx = KerrSchild.Raise(p4, x, a).Spatial;
+            var k = KerrSchild.Raise(p4, x, a);
+            dx = k.Spatial;
+            dt = k.T;
             KerrSchild.HamiltonianGradient(x, p4, a, out var dHdx);
             dp = -dHdx;
         }

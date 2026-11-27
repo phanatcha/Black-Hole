@@ -2,7 +2,7 @@ using System;
 
 namespace SilkySeal.Kerr
 {
-    /// <summary>How a backward-traced light ray ended. Absorbed: an <see cref="IEquatorObserver"/> stopped it.</summary>
+    /// <summary>How a backward-traced light ray ended. Absorbed: an <see cref="IRayObserver"/> stopped it.</summary>
     public enum RayStatus { Escaped, Captured, MaxSteps, Absorbed }
 
     /// <summary>Integration limits for one ray.</summary>
@@ -37,24 +37,32 @@ namespace SilkySeal.Kerr
     }
 
     /// <summary>
-    /// Sees each pass of a ray through the equatorial plane, where a thin disk lives. A struct so the tracer's loop
-    /// stays allocation-free and the call inlines.
+    /// Sees a ray as it is traced: each pass through the equatorial plane, where a thin disk lives, and each step, for
+    /// matter that fills space. A struct so the tracer's loop stays allocation-free and the calls inline.
     /// </summary>
-    public interface IEquatorObserver
+    public interface IRayObserver
     {
         /// <summary>
-        /// x: crossing point (z ≈ 0, interpolated between steps). kt, kPhi: the ray's conserved k_t and
-        /// k_φ = x k_y − y k_x. Return false to stop the ray as absorbed.
+        /// x: crossing point (z ≈ 0, interpolated between steps). time: Kerr-Schild coordinate time there, relative to
+        /// the camera (negative). kt, kPhi: the ray's conserved k_t and k_φ = x k_y − y k_x. Return false to stop the ray
+        /// as absorbed.
         /// </summary>
-        bool OnEquatorCrossing(Vector3d x, double kt, double kPhi);
+        bool OnEquatorCrossing(Vector3d x, double time, double kt, double kPhi);
+
+        /// <summary>
+        /// Called at the camera with h = 0 and time = 0, then after every accepted step with the new position, its
+        /// coordinate time relative to the camera and covector p_μ; h is that step's length in the affine parameter.
+        /// nextStep is the length the integrator tries next and may be lowered. Return false to stop the ray as absorbed.
+        /// </summary>
+        bool OnStep(Vector3d x, double time, Vector4d p, double h, ref double nextStep);
     }
 
     /// <summary>Traces past-directed null geodesics from the camera back to their source.</summary>
     public static class RayTracer
     {
         /// <summary>
-        /// Capture happens at r₊ + margin. In ingoing Kerr-Schild coordinates a past-directed ray only
-        /// approaches the future horizon geometrically (its momentum diverges), so r ≤ r₊ is never reached.
+        /// Capture happens at r₊ + margin, on the way in. In ingoing Kerr-Schild coordinates a past-directed ray from outside
+        /// only approaches the future horizon geometrically (its momentum diverges), so r ≤ r₊ is never reached.
         /// 1e-3 stays below the smallest gap between r₊ and the prograde photon orbit (0.0022 at a = 0.9999),
         /// so no escaping ray is cut off.
         /// </summary>
@@ -65,6 +73,10 @@ namespace SilkySeal.Kerr
         /// <summary>
         /// Integrates from x0 with past-directed null covector k0 until capture, escape or MaxSteps.
         /// O(steps); at most s.MaxSteps metric-gradient evaluations × 6. Allocation-free.
+        /// From inside r₊ every past-directed ray climbs back to r₊. With E − Ω_H L &gt; 0 (E = k_t, L = −k_φ for the
+        /// light's own direction) it crosses into the outside, where it came from; with E − Ω_H L &lt; 0 it would cross the
+        /// other branch of r₊, from the eternal hole's second universe or, in a real one, the collapsing star, which this
+        /// chart does not reach: it is captured at once (Steps = MaxSteps), so the region below a falling camera is black.
         /// </summary>
         public static RayResult Trace(Vector3d x0, Vector4d k0Lower, in TraceSettings s)
         {
@@ -72,33 +84,44 @@ namespace SilkySeal.Kerr
             return Trace(x0, k0Lower, s, ref none);
         }
 
-        /// <summary>As <see cref="Trace(Vector3d, Vector4d, in TraceSettings)"/>, reporting equator crossings to observer.</summary>
+        /// <summary>As <see cref="Trace(Vector3d, Vector4d, in TraceSettings)"/>, reporting the ray to observer.</summary>
         public static RayResult Trace<T>(Vector3d x0, Vector4d k0Lower, in TraceSettings s, ref T observer)
-            where T : struct, IEquatorObserver
+            where T : struct, IRayObserver
         {
-            double a = s.Spin, pt = k0Lower.T;
-            double captureRadius = KerrSchild.HorizonRadius(a) + HorizonMargin;
+            double a = s.Spin, pt = k0Lower.T, horizon = KerrSchild.HorizonRadius(a);
+            double captureRadius = horizon + HorizonMargin;
             var x = x0;
             var p = k0Lower.Spatial;
-            double h = InitialStepPerRadius * KerrSchild.Radius(x0, a);
+            double time = 0;
+            double r = KerrSchild.Radius(x0, a), previous = r;
+            double h = InitialStepPerRadius * r;
             double maxAbsH = Math.Abs(KerrSchild.Hamiltonian(x, k0Lower, a));
 
             var status = RayStatus.MaxSteps;
             int steps = 0, crossings = 0;
+            if (r < horizon && pt + a / (2 * horizon) * (x.X * p.Y - x.Y * p.X) < 0) { status = RayStatus.Captured; steps = s.MaxSteps; }
+            else if (!observer.OnStep(x, 0, k0Lower, 0, ref h)) { status = RayStatus.Absorbed; steps = s.MaxSteps; }
             for (; steps < s.MaxSteps; steps++)
             {
-                if (KerrSchild.Radius(x, a) <= captureRadius) { status = RayStatus.Captured; break; }
+                r = KerrSchild.Radius(x, a);
+                if (r <= captureRadius && r < previous) { status = RayStatus.Captured; break; }
                 if (x.Length >= s.FarRadius) { status = RayStatus.Escaped; break; }
-                var before = x;
+                var before = new Vector4d(time, x);
                 var pBefore = p;
                 double stepSize = h;
-                if (!GeodesicIntegrator.Step(ref x, ref p, pt, a, ref h, s.Tolerance)) continue;
-                maxAbsH = Math.Max(maxAbsH, Math.Abs(KerrSchild.Hamiltonian(x, new Vector4d(pt, p), a)));
-                if (before.Z * x.Z >= 0) continue;
-
-                crossings++;
-                var crossing = EquatorCrossing(before, pBefore, x, p, pt, a, stepSize);
-                if (!observer.OnEquatorCrossing(crossing, pt, x.X * p.Y - x.Y * p.X)) { status = RayStatus.Absorbed; break; }
+                if (!GeodesicIntegrator.Step(ref x, ref time, ref p, pt, a, ref h, s.Tolerance)) continue;
+                previous = r;
+                var pLower = new Vector4d(pt, p);
+                maxAbsH = Math.Max(maxAbsH, Math.Abs(KerrSchild.Hamiltonian(x, pLower, a)));
+                if (before.Z * x.Z < 0)
+                {
+                    crossings++;
+                    var v0 = KerrSchild.Raise(new Vector4d(pt, pBefore), before.Spatial, a) * stepSize;
+                    var v1 = KerrSchild.Raise(pLower, x, a) * stepSize;
+                    var crossing = EquatorCrossing(before, v0, new Vector4d(time, x), v1);
+                    if (!observer.OnEquatorCrossing(crossing.Spatial, crossing.T, pt, x.X * p.Y - x.Y * p.X)) { status = RayStatus.Absorbed; break; }
+                }
+                if (!observer.OnStep(x, time, pLower, stepSize, ref h)) { status = RayStatus.Absorbed; break; }
             }
 
             var momentum = new Vector4d(pt, p);
@@ -115,30 +138,29 @@ namespace SilkySeal.Kerr
         }
 
         /// <summary>
-        /// Where one accepted step of length h in the affine parameter meets z = 0: the root of the cubic Hermite through
-        /// both ends and their velocities dx/dλ. Error O(h⁴) where the chord's is O(h²); at the GPU tolerance a chord
-        /// puts the hit radius ~0.5 % off, a 2–3 % colour error on a cool disk.
+        /// Where and when one accepted step meets z = 0: the root of the cubic Hermite through both ends (t, x) and their
+        /// velocities h dx^μ/dλ. Error O(h⁴) where the chord's is O(h²); at the GPU tolerance a chord puts the hit radius
+        /// ~0.5 % off, a 2–3 % colour error on a cool disk.
         /// </summary>
-        static Vector3d EquatorCrossing(Vector3d x0, Vector3d p0, Vector3d x1, Vector3d p1, double pt, double a, double h)
+        static Vector4d EquatorCrossing(Vector4d x0, Vector4d v0, Vector4d x1, Vector4d v1)
         {
-            var v0 = KerrSchild.Raise(new Vector4d(pt, p0), x0, a).Spatial * h;
-            var v1 = KerrSchild.Raise(new Vector4d(pt, p1), x1, a).Spatial * h;
             // z changes sign over [0, 1], so Newton from the chord's root stays in the bracket.
-            double t = x0.Z / (x0.Z - x1.Z);
+            double s = x0.Z / (x0.Z - x1.Z);
             for (int i = 0; i < 3; i++)
             {
-                double t2 = t * t;
-                double z = (2 * t2 * t - 3 * t2 + 1) * x0.Z + (t2 * t - 2 * t2 + t) * v0.Z + (3 * t2 - 2 * t2 * t) * x1.Z + (t2 * t - t2) * v1.Z;
-                double dz = (6 * t2 - 6 * t) * (x0.Z - x1.Z) + (3 * t2 - 4 * t + 1) * v0.Z + (3 * t2 - 2 * t) * v1.Z;
-                t = Math.Min(1, Math.Max(0, t - z / dz));
+                double s2 = s * s;
+                double z = (2 * s2 * s - 3 * s2 + 1) * x0.Z + (s2 * s - 2 * s2 + s) * v0.Z + (3 * s2 - 2 * s2 * s) * x1.Z + (s2 * s - s2) * v1.Z;
+                double dz = (6 * s2 - 6 * s) * (x0.Z - x1.Z) + (3 * s2 - 4 * s + 1) * v0.Z + (3 * s2 - 2 * s) * v1.Z;
+                s = Math.Min(1, Math.Max(0, s - z / dz));
             }
-            double s2 = t * t, s3 = s2 * t;
-            return x0 * (2 * s3 - 3 * s2 + 1) + v0 * (s3 - 2 * s2 + t) + x1 * (3 * s2 - 2 * s3) + v1 * (s3 - s2);
+            double t2 = s * s, t3 = t2 * s;
+            return x0 * (2 * t3 - 3 * t2 + 1) + v0 * (t3 - 2 * t2 + s) + x1 * (3 * t2 - 2 * t3) + v1 * (t3 - t2);
         }
 
-        struct NoObserver : IEquatorObserver
+        struct NoObserver : IRayObserver
         {
-            public bool OnEquatorCrossing(Vector3d x, double kt, double kPhi) => true;
+            public bool OnEquatorCrossing(Vector3d x, double time, double kt, double kPhi) => true;
+            public bool OnStep(Vector3d x, double time, Vector4d p, double h, ref double nextStep) => true;
         }
 
         /// <summary>

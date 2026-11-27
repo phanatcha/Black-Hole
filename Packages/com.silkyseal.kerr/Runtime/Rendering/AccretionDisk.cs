@@ -22,6 +22,14 @@ namespace SilkySeal.Kerr.Rendering
             PeakTemperature,
         }
 
+        [Tooltip("Use broad orbiting streams and map the disk's blue-band emission to an ice-blue palette.")]
+        [SerializeField] bool blueStreams;
+        public bool BlueStreams => blueStreams;
+
+        [Tooltip("Cloud texture within Blue Streams. Higher values add overlapping wisps and density-dependent opacity.")]
+        [SerializeField, Range(0, 1)] float cloudTexture;
+        public float CloudTexture => cloudTexture;
+
         [SerializeField] TemperatureSource temperatureSource = TemperatureSource.MassAndAccretion;
 
         [Tooltip("Mass in solar masses. Heavier holes have cooler disks: T ∝ M^-1/4 at a fixed Eddington ratio.")]
@@ -42,6 +50,10 @@ namespace SilkySeal.Kerr.Rendering
         [Tooltip("Fraction of light blocked per pass through the disk. 1 is physical; lower shows the sky through it.")]
         [SerializeField, Range(0, 1)] float opacity = 1;
 
+        [Tooltip("Contrast of the streaks that orbit with the gas, each ring at its own Kepler rate. 0 is the smooth " +
+                 "textbook disk; the light averages the same either way.")]
+        [SerializeField, Range(0, 1)] float streaks = 1;
+
         BlackHole _hole;
         Texture2D _table;
         Vector4 _range;
@@ -54,6 +66,7 @@ namespace SilkySeal.Kerr.Rendering
         public float OuterRadius => outerRadius;
         public bool Shifts => shifts;
         public float Opacity => opacity;
+        public float Streaks => streaks;
 
         void OnDisable()
         {
@@ -87,6 +100,7 @@ namespace SilkySeal.Kerr.Rendering
         internal void ApplyRealisticPreset()
         {
             RecordUndo("Realistic disk");
+            blueStreams = false;
             temperatureSource = TemperatureSource.MassAndAccretion;
             massSolar = 1e8f;
             eddingtonRatio = 0.1f;
@@ -103,6 +117,7 @@ namespace SilkySeal.Kerr.Rendering
         internal void ApplyInterstellarPreset()
         {
             RecordUndo("Interstellar disk");
+            blueStreams = false;
             if (_hole == null) _hole = GetComponent<BlackHole>();
             _hole.SetSpin(0.6f);
             temperatureSource = TemperatureSource.PeakTemperature;

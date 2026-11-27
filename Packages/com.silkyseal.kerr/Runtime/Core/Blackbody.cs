@@ -10,8 +10,8 @@ namespace SilkySeal.Kerr
     /// </summary>
     public static class Blackbody
     {
-        const double Planck = 6.62607015e-34, LightSpeed = 2.99792458e8, Boltzmann = 1.380649e-23;
-        const double LuminousEfficacy = 683.0;        // lm/W at 555 nm, the definition of the candela
+        internal const double Planck = 6.62607015e-34, LightSpeed = 2.99792458e8, Boltzmann = 1.380649e-23;
+        internal const double LuminousEfficacy = 683.0;        // lm/W at 555 nm, the definition of the candela
         const int FirstNanometre = 360, LastNanometre = 830; // CIE 1931 table range, 1 nm steps
 
         /// <summary>CIE XYZ of a blackbody surface at this temperature; Y in cd/m². O(471).</summary>
@@ -35,12 +35,15 @@ namespace SilkySeal.Kerr
         /// </summary>
         public static Vector3d LinearSrgb(double kelvin)
         {
-            var c = Xyz(kelvin);
-            double r = 3.2404542 * c.X - 1.5371385 * c.Y - 0.4985314 * c.Z;
-            double g = -0.9692660 * c.X + 1.8760108 * c.Y + 0.0415560 * c.Z;
-            double b = 0.0556434 * c.X - 0.2040259 * c.Y + 1.0572252 * c.Z;
-            return new Vector3d(Math.Max(0, r), Math.Max(0, g), Math.Max(0, b));
+            var c = XyzToLinearSrgb(Xyz(kelvin));
+            return new Vector3d(Math.Max(0, c.X), Math.Max(0, c.Y), Math.Max(0, c.Z));
         }
+
+        /// <summary>CIE XYZ to linear sRGB, unclipped.</summary>
+        internal static Vector3d XyzToLinearSrgb(Vector3d c) => new Vector3d(
+            3.2404542 * c.X - 1.5371385 * c.Y - 0.4985314 * c.Z,
+            -0.9692660 * c.X + 1.8760108 * c.Y + 0.0415560 * c.Z,
+            0.0556434 * c.X - 0.2040259 * c.Y + 1.0572252 * c.Z);
 
         // Planck's law per unit wavelength, W·sr⁻¹·m⁻³.
         static double SpectralRadiance(double metres, double kelvin)
@@ -52,10 +55,10 @@ namespace SilkySeal.Kerr
         // shortcut: CIE 1931 colour matching functions by the multi-lobe Gaussian fit of Wyman, Sloan & Shirley (2013),
         // JCGT 2(2); within ~0.005 xy of the tabulated CIE data on the Planckian locus. Swap in the 1 nm CIE table
         // if colours ever need to be closer than one just-noticeable difference.
-        static double MatchX(double nm) =>
+        internal static double MatchX(double nm) =>
             1.056 * Lobe(nm, 599.8, 37.9, 31.0) + 0.362 * Lobe(nm, 442.0, 16.0, 26.7) - 0.065 * Lobe(nm, 501.1, 20.4, 26.2);
-        static double MatchY(double nm) => 0.821 * Lobe(nm, 568.8, 46.9, 40.5) + 0.286 * Lobe(nm, 530.9, 16.3, 31.1);
-        static double MatchZ(double nm) => 1.217 * Lobe(nm, 437.0, 11.8, 36.0) + 0.681 * Lobe(nm, 459.0, 26.0, 13.8);
+        internal static double MatchY(double nm) => 0.821 * Lobe(nm, 568.8, 46.9, 40.5) + 0.286 * Lobe(nm, 530.9, 16.3, 31.1);
+        internal static double MatchZ(double nm) => 1.217 * Lobe(nm, 437.0, 11.8, 36.0) + 0.681 * Lobe(nm, 459.0, 26.0, 13.8);
 
         static double Lobe(double nm, double centre, double widthBelow, double widthAbove)
         {

@@ -2,6 +2,7 @@
 #define SILKYSEAL_KERR_DISK_HLSL
 
 #include "KerrSchild.hlsl"
+#include "Swirl.hlsl"
 
 // Float mirror of Runtime/Core/ThinDiskRay.cs and CircularOrbit.Shift; temperature and colour come from the tables
 // DiskTables.cs bakes from the exact Core functions. GpuDiskParityTests compares the two pixel by pixel.
@@ -11,7 +12,10 @@
 
 int _DiskEnabled;
 int _DiskShifts;
+int _BlueStreams;
+float _CloudTexture;
 float _DiskOpacity;
+float _DiskSwirl;          // SwirlPattern contrast; 0 leaves the disk smooth
 float4 _DiskRange;        // (r_in, 1 / ln(r_out / r_in), r_out, T_peak in K)
 float4 _BlackbodyRange;   // (ln T_min, 1 / (ln T_max − ln T_min))
 Texture2D<float> _DiskFlux;    // (T / T_peak)⁴ over ln r
@@ -32,18 +36,24 @@ float KerrDiskFlux(float r)
     return lerp(_DiskFlux.Load(int3(i0, 0, 0)), _DiskFlux.Load(int3(i0 + 1, 0, 0)), f);
 }
 
-// Linear sRGB in cd/m² of a blackbody surface.
-float3 KerrBlackbody(float kelvin)
+// (linear sRGB / Y, log2 Y in cd/m²) of a blackbody surface.
+float4 KerrBlackbodyTexel(float kelvin)
 {
     int i0; float f;
     KerrTableTexels((log(kelvin) - _BlackbodyRange.x) * _BlackbodyRange.y, i0, f);
-    float4 c = lerp(_Blackbody.Load(int3(i0, 0, 0)), _Blackbody.Load(int3(i0 + 1, 0, 0)), f);
+    return lerp(_Blackbody.Load(int3(i0, 0, 0)), _Blackbody.Load(int3(i0 + 1, 0, 0)), f);
+}
+
+// Linear sRGB in cd/m² of a blackbody surface.
+float3 KerrBlackbody(float kelvin)
+{
+    float4 c = KerrBlackbodyTexel(kelvin);
     return c.rgb * exp2(c.a);
 }
 
 // One pass of the ray through z = 0 at x, with the ray's conserved k_t and k_φ = x k_y − y k_x.
 // Composites front to back; returns false once the disk has blocked everything behind it.
-bool KerrDiskCrossing(float3 x, float kt, float kPhi, float a, inout float3 radiance, inout float transmittance)
+bool KerrDiskCrossing(float3 x, float time, float kt, float kPhi, float a, inout float3 radiance, inout float transmittance)
 {
     float r = KerrRadius(x, a);
     if (r < _DiskRange.x || r > _DiskRange.z) return true;
@@ -58,8 +68,23 @@ bool KerrDiskCrossing(float3 x, float kt, float kPhi, float a, inout float3 radi
         float ut = (r * sr + a) / (sqrt(sr) * sr * sqrt(r * sr - 3.0 * sr + 2.0 * a));
         kelvin /= ut * (kt + kPhi / (r * sr + a));
     }
-    radiance += transmittance * _DiskOpacity * KerrBlackbody(kelvin);
-    transmittance *= 1.0 - _DiskOpacity;
+    // The streaks are where the gas was when this light left it, time after the camera's moment.
+    bool broad = _BlueStreams != 0;
+    float3 emission = KerrBlackbody(kelvin);
+    // Keep the shifted blue-band intensity. The partially obscured, compressed arcs need less fine contrast.
+    if (broad) emission = max(0.0, emission.b) * float3(0.18, 0.47, 1.0);
+    float contrast = broad ? _DiskSwirl * pow(transmittance, 4.0 - 2.0 * _CloudTexture) : _DiskSwirl;
+    float streaks = KerrSwirl(contrast, broad ? KERR_SWIRL_GAS_COARSENESS : 1, r, atan2(x.y, x.x), 0.0, time, a, broad, _CloudTexture);
+    float opacity = _DiskOpacity;
+    if (broad && _CloudTexture > 0.0)
+    {
+        // Keep transparent and opaque endpoints exact. Brighter wisps obscure a little more of the far side.
+        opacity += 0.55 * _CloudTexture * opacity * (1.0 - opacity) * (streaks - 1.0);
+        float outer = smoothstep(3.0, 10.0, r / _DiskRange.x);
+        streaks *= 1.0 + 0.8 * _CloudTexture * outer * max(0.0, streaks - 1.0);
+    }
+    radiance += transmittance * opacity * streaks * emission;
+    transmittance *= 1.0 - opacity;
     return transmittance >= KERR_OPAQUE_TRANSMITTANCE;
 }
 

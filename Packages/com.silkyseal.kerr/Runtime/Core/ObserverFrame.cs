@@ -53,15 +53,24 @@ namespace SilkySeal.Kerr
             if (!(beta >= 0 && beta < 1))
                 throw new ArgumentOutOfRangeException(nameof(beta), beta, "Speed must be in [0, 1) of c.");
 
-            var u = Zamo(x, a);
-            var forward = Orthonormalize(new Vector4d(0, forwardKS), u, default, default, x, a);
-            var up = Orthonormalize(new Vector4d(0, upKS), u, forward, default, x, a);
-            var right = Orthonormalize(new Vector4d(0, rightKS), u, forward, up, x, a);
-            var frame = new CameraFrame { Position = x, U = u, Right = right, Up = up, Forward = forward, Spin = a };
-
+            var frame = FromVelocity(x, a, Zamo(x, a), forwardKS, upKS, rightKS);
             if (beta > 0 && velocityDirKS.Length > 0)
                 Boost(ref frame, new Vector4d(0, velocityDirKS), beta);
             return frame;
+        }
+
+        /// <summary>
+        /// Tetrad of an observer with 4-velocity u, aligned with the camera axes as in <see cref="Build"/>. Works anywhere
+        /// u is timelike, inside the horizon too, where no ZAMO exists. u is renormalized, so a slightly drifted geodesic
+        /// velocity still gives an exact frame.
+        /// </summary>
+        public static CameraFrame FromVelocity(Vector3d x, double a, Vector4d u, Vector3d forwardKS, Vector3d upKS, Vector3d rightKS)
+        {
+            u *= 1.0 / Math.Sqrt(-KerrSchild.Dot(u, u, x, a));
+            var forward = Orthonormalize(new Vector4d(0, forwardKS), u, default, default, x, a);
+            var up = Orthonormalize(new Vector4d(0, upKS), u, forward, default, x, a);
+            var right = Orthonormalize(new Vector4d(0, rightKS), u, forward, up, x, a);
+            return new CameraFrame { Position = x, U = u, Right = right, Up = up, Forward = forward, Spin = a };
         }
 
         // Removes the components along u (timelike) and e1, e2 (unit spacelike), then normalizes.

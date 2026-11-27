@@ -28,8 +28,13 @@ namespace SilkySeal.Kerr.Rendering
         [Tooltip("Sky behind the hole. Empty uses a procedural grid that makes lensing easy to read.")]
         [SerializeField] Cubemap sky;
 
-        [Tooltip("Luminance in cd/m² of a sky texel of value 1. A moonless night sky averages about 0.001; " +
-                 "next to a lit disk any realistic sky is many stops too dim to see.")]
+        [Tooltip("Star catalogue packed by StarCatalogue.Pack; the package ships Hipparcos. Stars keep their true " +
+                 "brightness, so they show only when nothing much brighter is in view. Empty: no stars.")]
+        [SerializeField] TextAsset stars;
+
+        [Tooltip("Luminance in cd/m² of a sky texel of value 1. The packaged MilkyWay.exr takes 0.011, which puts " +
+                 "the galactic poles at about 23.5 V mag/arcsec². Next to a lit disk any realistic sky is many stops " +
+                 "too dim to see.")]
         [SerializeField, Min(0)] float skyLuminance = 1;
 
         static readonly List<BlackHole> s_Active = new List<BlackHole>();
@@ -40,7 +45,14 @@ namespace SilkySeal.Kerr.Rendering
         public double Spin => spin;
         public float UnitsPerM => unitsPerM;
         public float SpeedOfLight => speedOfLight;
+
+        /// <summary>
+        /// Kerr-Schild coordinate time in M after this many seconds. shortcut: treats scene time as the distant
+        /// observers' time, which drifts from a deep or fast camera's own; a falling KerrObserver uses its fall's instead.
+        /// </summary>
+        public double CoordinateTime(double seconds) => seconds * speedOfLight / unitsPerM;
         public Cubemap Sky => sky;
+        public TextAsset Stars => stars;
         public float SkyLuminance => skyLuminance;
 
         /// <summary>For presets and tests; the inspector range applies.</summary>
@@ -64,6 +76,10 @@ namespace SilkySeal.Kerr.Rendering
             var local = transform.InverseTransformDirection(worldDir);
             return new Vector3d(local.x, local.z, local.y);
         }
+
+        /// <summary>Kerr-Schild coordinates in units of M back to a world position.</summary>
+        public Vector3 KerrSchildToWorld(Vector3d x) =>
+            transform.TransformPoint(new Vector3((float)x.X, (float)x.Z, (float)x.Y) * unitsPerM);
 
         /// <summary>Kerr-Schild direction back to a world direction.</summary>
         public Vector3 KerrSchildDirToWorld(Vector3d d) =>

@@ -260,6 +260,7 @@ GameObject:
   - component: {fileID: 423031139}
   - component: {fileID: 423031138}
   - component: {fileID: 423031143}
+  - component: {fileID: 423031144}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -281,7 +282,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: SilkySeal.Kerr.Rendering::SilkySeal.Kerr.Rendering.KerrObserver
   exposureMode: 0
   manualEV100: 30
-  exposureCompensation: 0
+  exposureCompensation: 0.35
   adaptationSpeed: 2
 --- !u!114 &423031139
 MonoBehaviour:
@@ -341,7 +342,7 @@ Camera:
     height: 1
   near clip plane: 0.3
   far clip plane: 1000
-  field of view: 60
+  field of view: 28
   orthographic: 0
   orthographic size: 5
   m_Depth: -1
@@ -367,8 +368,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 423031137}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.049813703, y: 0, z: 0, w: 0.99875855}
-  m_LocalPosition: {x: 0, y: 3, z: -30}
+  m_LocalRotation: {x: 0.07742082, y: 0, z: 0, w: 0.9969985}
+  m_LocalPosition: {x: 0, y: 7.5, z: -48}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -418,6 +419,19 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
+--- !u!114 &423031144
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 423031137}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdcbf1fe5a6334c06997db8a7619045b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SilkySeal.Kerr.Controls::SilkySeal.Kerr.Controls.PlungeCamera
+  orbitsPerSecond: 0.1
 --- !u!1 &1448427874
 GameObject:
   m_ObjectHideFlags: 0
@@ -478,6 +492,7 @@ GameObject:
   - component: {fileID: 1914402829}
   - component: {fileID: 1914402828}
   - component: {fileID: 1914402830}
+  - component: {fileID: 1914402831}
   m_Layer: 0
   m_Name: Black Hole
   m_TagString: Untagged
@@ -500,8 +515,9 @@ MonoBehaviour:
   spin: 0.6
   unitsPerM: 1
   speedOfLight: 30
-  sky: {fileID: 0}
-  skyLuminance: 1
+  sky: {fileID: 8900000, guid: ea5ac453e5ff343cd9e5d6f0d850c4b7, type: 3}
+  stars: {fileID: 4900000, guid: bb9910094602c4a9b94c77cb6e9bffbe, type: 3}
+  skyLuminance: 0.011
 --- !u!4 &1914402829
 Transform:
   m_ObjectHideFlags: 0
@@ -529,13 +545,32 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 976b49ceb194e48e396f661512793f21, type: 3}
   m_Name: 
   m_EditorClassIdentifier: SilkySeal.Kerr.Rendering::SilkySeal.Kerr.Rendering.AccretionDisk
-  temperatureSource: 0
+  blueStreams: 1
+  cloudTexture: 1
+  temperatureSource: 1
   massSolar: 100000000
   eddingtonRatio: 0.1
-  peakTemperature: 6000
-  outerRadius: 30
+  peakTemperature: 7050
+  outerRadius: 90
   shifts: 1
-  opacity: 1
+  opacity: 0.34
+  streaks: 0.75
+--- !u!114 &1914402831
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1914402827}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 527cf24adfb0a4437be58b59a95d50f2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SilkySeal.Kerr.Rendering::SilkySeal.Kerr.Rendering.HotGas
+  view: 2
+  fieldMix: {x: 0, y: 1, z: 0}
+  whiteKelvin: 6e+10
+  clumps: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

@@ -7,7 +7,8 @@ namespace SilkySeal.Kerr.Controls
     /// Free-flight camera: WASD to move, Q/E down/up, hold the right mouse button to look,
     /// Shift for a speed boost, scroll to change the base speed. Velocity eases toward the keys, so switching
     /// A to D glides through a stop instead of snapping. It only moves the Transform;
-    /// KerrObserver reads the motion from there, so controls and physics stay independent.
+    /// KerrObserver reads the motion from there, so controls and physics stay independent. Turn MovementEnabled off while
+    /// something else carries the camera, such as a free fall; looking around still works.
     /// Actions are built in code so the package does not depend on a project's input asset.
     /// </summary>
     [DisallowMultipleComponent]
@@ -35,6 +36,20 @@ namespace SilkySeal.Kerr.Controls
         float _yaw, _pitch;
         Vector3 _velocity;
 
+        bool _movementEnabled = true;
+
+        /// <summary>Off: the keys stop moving the camera. Setting it either way picks up the look from the current rotation.</summary>
+        internal bool MovementEnabled
+        {
+            get => _movementEnabled;
+            set
+            {
+                _movementEnabled = value;
+                _velocity = Vector3.zero;
+                ReadLook();
+            }
+        }
+
         void OnEnable() => SetInputEnabled(true);
         void OnDisable() => SetInputEnabled(false);
 
@@ -53,13 +68,7 @@ namespace SilkySeal.Kerr.Controls
         internal void SetInputEnabled(bool enabled)
         {
             _velocity = Vector3.zero;
-            if (enabled)
-            {
-                var euler = transform.eulerAngles;
-                _yaw = euler.y;
-                // eulerAngles reports pitch in [0, 360); fold it back to [−180, 180) before clamping.
-                _pitch = Mathf.Clamp(Mathf.DeltaAngle(0, euler.x), -MaxPitchDegrees, MaxPitchDegrees);
-            }
+            if (enabled) ReadLook();
             SetEnabled(_move, enabled);
             SetEnabled(_vertical, enabled);
             SetEnabled(_look, enabled);
@@ -83,12 +92,21 @@ namespace SilkySeal.Kerr.Controls
                 t.rotation = Quaternion.Euler(_pitch, _yaw, 0);
             }
 
+            if (!_movementEnabled) return;
             var move = _move.ReadValue<Vector2>();
             var direction = t.right * move.x + t.forward * move.y + t.up * _vertical.ReadValue<float>();
             var target = direction * (baseSpeed * (_boost.IsPressed() ? boostMultiplier : 1f));
             // Exponential approach: the same feel at any frame rate, unlike a per-frame lerp factor.
             _velocity = moveSmoothing > 0 ? Vector3.Lerp(_velocity, target, 1 - Mathf.Exp(-dt / moveSmoothing)) : target;
             t.position += _velocity * dt;
+        }
+
+        void ReadLook()
+        {
+            var euler = transform.eulerAngles;
+            _yaw = euler.y;
+            // eulerAngles reports pitch in [0, 360); fold it back to [−180, 180) before clamping.
+            _pitch = Mathf.Clamp(Mathf.DeltaAngle(0, euler.x), -MaxPitchDegrees, MaxPitchDegrees);
         }
 
         static void SetEnabled(InputAction action, bool enabled)

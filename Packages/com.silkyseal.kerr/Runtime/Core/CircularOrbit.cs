@@ -26,6 +26,13 @@ namespace SilkySeal.Kerr
             return (r * sr - 2 * sr + a) / (Math.Sqrt(sr) * Math.Sqrt(r * sr - 3 * sr + 2 * a) * sr);
         }
 
+        /// <summary>Angular momentum per unit rest mass, u_φ.</summary>
+        public static double SpecificAngularMomentum(double r, double a)
+        {
+            double sr = Math.Sqrt(r);
+            return (r * r - 2 * a * sr + a * a) / (Math.Sqrt(sr) * sr * Math.Sqrt(r * sr - 3 * sr + 2 * a));
+        }
+
         /// <summary>
         /// Kerr-Schild 4-velocity of gas on the circular orbit through equatorial point x: u^t (∂t + Ω ∂φ),
         /// with ∂φ = (0, −y, x, 0). u^t is the same in both charts because u^r = 0.

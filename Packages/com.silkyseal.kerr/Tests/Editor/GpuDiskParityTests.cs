@@ -1,11 +1,9 @@
 using System;
-using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using SilkySeal.Kerr.Rendering;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Rendering;
 using static SilkySeal.Kerr.Tests.GpuParityTests;
 
 namespace SilkySeal.Kerr.Tests
@@ -16,21 +14,26 @@ namespace SilkySeal.Kerr.Tests
     /// </summary>
     public class GpuDiskParityTests
     {
-        const double PeakKelvin = 6000, OuterRadius = 30;
+        // SwirlTime: the camera's coordinate time, M; late enough that the inner rings have turned many times.
+        const double PeakKelvin = 6000, OuterRadius = 30, SwirlTime = 5000;
         // Error is measured against the pixel's brightest channel; pixels darker than this are not "lit".
         const double ColourTolerance = 0.02, LitFloor = 1e-3, RequiredMatchFraction = 0.99;
 
-        [TestCase(0.0, 1.0)]
-        [TestCase(0.9, 0.5)]
-        public void Disk_MatchesCpuShading(double a, double opacity)
+        [TestCase(0.0, 1.0, 0.0, false)]
+        [TestCase(0.9, 0.5, 0.0, false)]
+        [TestCase(0.9, 1.0, 1.0, false)]
+        [TestCase(0.6, 0.34, 0.75, true)]
+        [TestCase(0.6, 0.34, 0.75, true, 1.0)]
+        public void Disk_MatchesCpuShading(double a, double opacity, double swirl, bool broadStreams, double cloudTexture = 0)
         {
             var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(ShaderPath);
             var disk = ThinDisk.FromPeakTemperature(a, OuterRadius, PeakKelvin);
             var frame = TestFrame(a);
             // Exposure puts the rest-frame peak-temperature blackbody at luminance 1.
             double exposure = 1 / Blackbody.Xyz(PeakKelvin).Y;
-            var gpu = RunGpu(shader, frame, disk, opacity, (float)exposure);
-            var cpu = RunCpu(frame, disk, opacity, exposure);
+            var pattern = new SwirlPattern(a, swirl, SwirlTime, broadStreams: broadStreams, cloudTexture: cloudTexture);
+            var gpu = RunGpu(shader, frame, disk, opacity, pattern, (float)exposure);
+            var cpu = RunCpu(frame, disk, opacity, pattern, exposure);
 
             int lit = 0, matched = 0;
             double worst = 0;
@@ -48,19 +51,19 @@ namespace SilkySeal.Kerr.Tests
             }
 
             double fraction = (double)matched / lit;
-            Debug.Log($"[GpuDiskParity a={a} opacity={opacity}] within {ColourTolerance:P0}: {fraction:P3} of {lit} lit, worst {worst:P1}");
+            Debug.Log($"[GpuDiskParity a={a} opacity={opacity} swirl={swirl}] within {ColourTolerance:P0}: {fraction:P3} of {lit} lit, worst {worst:P1}");
             Assert.Greater(lit, cpu.Length / 5, "the disk should fill a good part of the frame");
             Assert.GreaterOrEqual(fraction, RequiredMatchFraction);
         }
 
-        static Vector3d[] RunCpu(CameraFrame frame, ThinDisk disk, double opacity, double exposure)
+        static Vector3d[] RunCpu(CameraFrame frame, ThinDisk disk, double opacity, SwirlPattern pattern, double exposure)
         {
             var results = new Vector3d[GridWidth * GridHeight];
             var settings = TraceSettings.Reference(frame.Spin);
             double tanHalf = Math.Tan(VerticalFov / 2);
             Parallel.For(0, results.Length, i =>
             {
-                var ray = new ThinDiskRay(disk, opacity, true);
+                var ray = new ThinDiskRay(disk, opacity, true, pattern);
                 var k = RayTracer.PixelRay(frame, Ndc(i % GridWidth, GridWidth), Ndc(i / GridWidth, GridHeight), tanHalf, Aspect);
                 RayTracer.Trace(frame.Position, k, settings, ref ray);
                 results[i] = ray.Radiance * exposure;
@@ -68,54 +71,48 @@ namespace SilkySeal.Kerr.Tests
             return results;
         }
 
-        static Vector4[] RunGpu(ComputeShader shader, CameraFrame frame, ThinDisk disk, double opacity, float exposure)
+        // CSTrace into a trace buffer, then CSShade with no sky and no stars.
+        static Vector4[] RunGpu(ComputeShader shader, CameraFrame frame, ThinDisk disk, double opacity, SwirlPattern pattern, float exposure)
         {
-            int kernel = shader.FindKernel("CSRender");
-            var output = new RenderTexture(GridWidth, GridHeight, 0, RenderTextureFormat.ARGBFloat) { enableRandomWrite = true };
-            output.Create();
-            var sky = new Cubemap(1, TextureFormat.RGBA32, false);
+            int kernel = shader.FindKernel("CSTrace");
+            var trace = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2 * GridWidth * GridHeight, 4 * sizeof(float));
             var blackbody = DiskTables.BakeBlackbody();
             var flux = DiskTables.BakeFlux(disk, out var range);
-            var meter = new GraphicsBuffer(GraphicsBuffer.Target.Structured, GridWidth * GridHeight, sizeof(float));
-            var state = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 2 * sizeof(float));
             try
             {
                 SetCamera(shader, frame);
                 shader.SetInt("_DiskEnabled", 1);
                 shader.SetInt("_DiskShifts", 1);
+                shader.SetFloat("_CloudTexture", (float)pattern.CloudTexture);
+                shader.SetInt("_BlueStreams", pattern.BroadStreams ? 1 : 0);
+                shader.SetInt("_GasView", 0); // the scene's own render may have left the hot gas on
                 shader.SetFloat("_DiskOpacity", (float)opacity);
+                shader.SetFloat("_DiskSwirl", (float)pattern.Contrast);
+                var turns = new Vector4[SwirlTables.Size];
+                SwirlTables.Turns(pattern.Spin, pattern.Time, turns);
+                shader.SetVectorArray("_SwirlTurns", turns);
                 shader.SetVector("_DiskRange", range);
                 shader.SetVector("_BlackbodyRange", DiskTables.BlackbodyRange);
                 shader.SetTexture(kernel, "_DiskFlux", flux);
                 shader.SetTexture(kernel, "_Blackbody", blackbody);
-                shader.SetFloat("_SkyLuminance", 0);
-                // Manual exposure: 2^(compensation − EV100) / 1.2 = exposure.
-                shader.SetInt("_AutoExposure", 0);
-                shader.SetFloat("_ExposureCompensation", 0);
-                shader.SetFloat("_ManualEV100", -Mathf.Log(1.2f * exposure, 2));
-                shader.SetBuffer(kernel, "_MeterSamples", meter);
-                shader.SetBuffer(kernel, "_ExposureState", state);
-                shader.SetFloat("_UseSky", 0);
+                shader.SetTexture(kernel, "_GasPowerLaw", Texture2D.blackTexture); // declared by TraceRay; Metal wants it bound
                 shader.SetInt("_Blackout", 0);
                 shader.SetMatrix("_HoleToWorld", Matrix4x4.identity);
-                shader.SetTexture(kernel, "_Sky", sky);
-                shader.SetTexture(kernel, "_Output", output);
+                shader.SetBuffer(kernel, "_Trace", trace);
                 Dispatch(shader, kernel);
 
-                var request = AsyncGPUReadback.Request(output);
-                request.WaitForCompletion();
-                Assert.IsFalse(request.hasError, "GPU readback failed");
-                return request.GetData<Vector4>().ToArray();
+                var traced = new Vector4[2 * GridWidth * GridHeight];
+                trace.GetData(traced);
+                return GpuSkyParityTests.Shade(shader, traced, GridWidth, GridHeight, VerticalFov / GridHeight, null, null, 0, exposure);
             }
             finally
             {
                 // Compute parameters persist on the asset; leave the disk off for the other kernels' tests.
                 shader.SetInt("_DiskEnabled", 0);
-                output.Release();
-                meter.Release();
-                state.Release();
-                UnityEngine.Object.DestroyImmediate(output);
-                UnityEngine.Object.DestroyImmediate(sky);
+                shader.SetInt("_BlueStreams", 0);
+                shader.SetFloat("_CloudTexture", 0);
+                shader.SetFloat("_DiskSwirl", 0);
+                trace.Release();
                 UnityEngine.Object.DestroyImmediate(blackbody);
                 UnityEngine.Object.DestroyImmediate(flux);
             }

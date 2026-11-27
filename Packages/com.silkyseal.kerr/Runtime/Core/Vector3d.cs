@@ -19,6 +19,9 @@ namespace SilkySeal.Kerr
         /// <summary>Euclidean dot product of the coordinate components (not the spacetime metric).</summary>
         public static double Dot(Vector3d a, Vector3d b) => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
 
+        public static Vector3d Cross(Vector3d a, Vector3d b) =>
+            new Vector3d(a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X);
+
         public double Length => Math.Sqrt(Dot(this, this));
 
         public Vector3d Normalized => this / Length;

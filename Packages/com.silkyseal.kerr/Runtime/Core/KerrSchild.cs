@@ -14,12 +14,16 @@ namespace SilkySeal.Kerr
         public static double Radius(Vector3d x, double a)
         {
             double w = Vector3d.Dot(x, x) - a * a;
-            // shortcut: 0.5w + sqrt cancels badly when w < 0 (only below the inner horizon); use the conjugate form a²z²/(sqrt − 0.5w) for the Phase 6 plunge.
+            // shortcut: 0.5w + sqrt cancels when w < 0 (r < a|cos θ|, near the axis inside the horizon), losing about a²/(2r²) ulps:
+            // under 25 anywhere a fall reaches (r ≥ r₋ + FreeFall.EndMargin). Use the conjugate a²z²/(sqrt − 0.5w) to go deeper.
             return Math.Sqrt(0.5 * w + Math.Sqrt(0.25 * w * w + a * a * x.Z * x.Z));
         }
 
         /// <summary>Outer event horizon r₊ = 1 + √(1 − a²).</summary>
         public static double HorizonRadius(double a) => 1.0 + Math.Sqrt(1.0 - a * a);
+
+        /// <summary>Inner (Cauchy) horizon r₋ = 1 − √(1 − a²); 0 at a = 0.</summary>
+        public static double InnerHorizonRadius(double a) => 1.0 - Math.Sqrt(1.0 - a * a);
 
         /// <summary>Metric inner product g(u, v) of two vectors (upper indices) at x.</summary>
         public static double Dot(Vector4d u, Vector4d v, Vector3d x, double a)

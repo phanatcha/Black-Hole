@@ -1,7 +1,7 @@
 #ifndef SILKYSEAL_KERR_EXPOSURE_HLSL
 #define SILKYSEAL_KERR_EXPOSURE_HLSL
 
-// Eye adaptation. CSRender writes the true scene luminance of every KERR_METER_STRIDE-th pixel into _MeterSamples:
+// Eye adaptation. CSShade writes the true scene luminance of every KERR_METER_STRIDE-th pixel into _MeterSamples:
 // float32, so neither the half-float output's clamp nor its underflow can bias the meter and lock exposure.
 // CSMeasureExposure averages log luminance over the samples within KERR_METER_RANGE stops of the brightest, so a sky
 // 30 stops below the disk goes black as it would to an eye, and eases the persistent EV100 toward it.

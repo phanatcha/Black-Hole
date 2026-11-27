@@ -63,6 +63,29 @@ namespace SilkySeal.Kerr.Tests
             }
         }
 
+        // Between r₋ = 0.56 and r₊ = 1.44 there is no ZAMO, but the fall's own velocity still carries a frame.
+        [Test]
+        public void FromVelocity_InsideTheHorizon_IsOrthonormalAroundTheFall()
+        {
+            var x0 = new Vector3d(5, 1, 2);
+            var fall = new FreeFall(x0, ObserverFrame.Zamo(x0, Spin), Spin);
+            while (fall.Radius > 1.2) fall.Advance(0.05);
+            var x = fall.Position;
+            var forward = (-x).Normalized;
+
+            var f = ObserverFrame.FromVelocity(x, Spin, fall.Velocity, forward, new Vector3d(0, 0, 1), new Vector3d(0, 1, 0));
+
+            var basis = new[] { f.U, f.Right, f.Up, f.Forward };
+            for (int i = 0; i < 4; i++)
+            for (int j = i; j < 4; j++)
+            {
+                double expected = i != j ? 0 : i == 0 ? -1 : 1;
+                Assert.AreEqual(expected, KerrSchild.Dot(basis[i], basis[j], x, Spin), AlgebraTolerance, $"pair {i},{j}");
+            }
+            Assert.AreEqual(-1, KerrSchild.Dot(f.U, fall.Velocity, x, Spin), 1e-8, "U is the fall's velocity");
+            Assert.Greater(KerrSchild.Dot(f.Forward, new Vector4d(0, forward), x, Spin), 0, "looks where asked");
+        }
+
         [Test]
         public void Aberration_FarFromHole_MatchesSpecialRelativity()
         {

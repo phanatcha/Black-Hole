@@ -24,6 +24,61 @@ namespace SilkySeal.Kerr.Tests
         }
 
         [Test]
+        public void SwirlPattern_ScalesTheLight_AsItWasWhenTheLightLeft()
+        {
+            var disk = ThinDisk.FromPeakTemperature(0, 30, 6000);
+            var swirl = new SwirlPattern(0, 1, 2000);
+            var smooth = new ThinDiskRay(disk, 1, true);
+            var streaky = new FirstCrossingTime { Disk = new ThinDiskRay(disk, 1, true, swirl), Time = double.NaN };
+            TraceMeridional(10, ref smooth);
+            TraceMeridional(10, ref streaky);
+
+            // The ray lies in the y = 0 plane and meets the disk at x > 0, so φ = 0.
+            double r = streaky.Disk.FirstHitRadius, seen = swirl.Value(r, 0, 0, streaky.Time);
+            Assert.Greater(Math.Abs(seen - swirl.Value(r, 0, 0, 0)), 0.01, "the delay should matter here");
+            AssertRadiance(smooth.Radiance * seen, streaky.Disk.Radiance);
+        }
+
+        [Test]
+        public void CloudTexture_VariesPartialOpacity_AndPreservesItsEndpoints()
+        {
+            var disk = ThinDisk.FromPeakTemperature(0, 30, 7000);
+            var clouds = new SwirlPattern(0, 0.75, 300, broadStreams: true, cloudTexture: 1);
+            double min = 1, max = 0;
+            for (int i = 0; i < 64; i++)
+            {
+                double phi = 2 * Math.PI * i / 64;
+                var x = new Vector3d(12 * Math.Cos(phi), 12 * Math.Sin(phi), 0);
+                var clear = new ThinDiskRay(disk, 0, false, clouds);
+                var veil = new ThinDiskRay(disk, 0.34, false, clouds);
+                var opaque = new ThinDiskRay(disk, 1, false, clouds);
+                clear.OnEquatorCrossing(x, 0, 1, 0);
+                veil.OnEquatorCrossing(x, 0, 1, 0);
+                opaque.OnEquatorCrossing(x, 0, 1, 0);
+                Assert.AreEqual(1, clear.Transmittance);
+                Assert.AreEqual(0, opaque.Transmittance);
+                min = Math.Min(min, veil.Transmittance);
+                max = Math.Max(max, veil.Transmittance);
+            }
+            Assert.Less(min, 1 - 0.34);
+            Assert.Greater(max, 1 - 0.34);
+        }
+
+        struct FirstCrossingTime : IRayObserver
+        {
+            public ThinDiskRay Disk;
+            public double Time;
+
+            public bool OnEquatorCrossing(Vector3d x, double time, double kt, double kPhi)
+            {
+                if (double.IsNaN(Time)) Time = time;
+                return Disk.OnEquatorCrossing(x, time, kt, kPhi);
+            }
+
+            public bool OnStep(Vector3d x, double time, Vector4d p, double h, ref double nextStep) => true;
+        }
+
+        [Test]
         public void TranslucentDisk_LetsTheRayThroughAtReducedWeight()
         {
             var disk = ThinDisk.FromPeakTemperature(0, 30, 6000);
@@ -97,7 +152,7 @@ namespace SilkySeal.Kerr.Tests
         }
 
         // A Schwarzschild ray from a static camera on the +z axis, aimed at (aim, 0, 0) on the equator.
-        static RayResult TraceMeridional(double aim, ref ThinDiskRay observer)
+        static RayResult TraceMeridional<T>(double aim, ref T observer) where T : struct, IRayObserver
         {
             var pos = new Vector3d(0, 0, CameraHeight);
             var frame = ObserverFrame.Build(pos, 0, (new Vector3d(aim, 0, 0) - pos).Normalized,
