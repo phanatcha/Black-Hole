@@ -76,6 +76,7 @@ namespace SilkySeal.Kerr.Tests
         {
             int kernel = shader.FindKernel("CSTrace");
             var trace = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2 * GridWidth * GridHeight, 4 * sizeof(float));
+            using var scene = SceneBuffers.Empty(); // declared by TraceRay; Metal wants it bound
             var blackbody = DiskTables.BakeBlackbody();
             var flux = DiskTables.BakeFlux(disk, out var range);
             try
@@ -99,6 +100,7 @@ namespace SilkySeal.Kerr.Tests
                 shader.SetInt("_Blackout", 0);
                 shader.SetMatrix("_HoleToWorld", Matrix4x4.identity);
                 shader.SetBuffer(kernel, "_Trace", trace);
+                scene.Bind(shader, kernel);
                 Dispatch(shader, kernel);
 
                 var traced = new Vector4[2 * GridWidth * GridHeight];

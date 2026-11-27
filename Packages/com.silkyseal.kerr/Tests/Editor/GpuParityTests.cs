@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using SilkySeal.Kerr.Rendering;
 using UnityEditor;
 using UnityEngine;
 
@@ -125,6 +126,7 @@ namespace SilkySeal.Kerr.Tests
         {
             int kernel = shader.FindKernel("CSTraceDirections");
             var buffer = new ComputeBuffer(GridWidth * GridHeight, sizeof(float) * 4);
+            using var scene = SceneBuffers.Empty(); // declared by TraceRay; Metal wants it bound
             try
             {
                 SetCamera(shader, f);
@@ -134,6 +136,7 @@ namespace SilkySeal.Kerr.Tests
                 shader.SetTexture(kernel, "_Blackbody", Texture2D.blackTexture);
                 shader.SetTexture(kernel, "_GasPowerLaw", Texture2D.blackTexture); // declared by TraceRay; Metal wants it bound
                 shader.SetBuffer(kernel, "_Directions", buffer);
+                scene.Bind(shader, kernel);
                 Dispatch(shader, kernel);
                 var data = new Vector4[GridWidth * GridHeight];
                 buffer.GetData(data);

@@ -82,12 +82,12 @@ namespace SilkySeal.Kerr.Rendering
             public ComputeShader shader;
             public int traceKernel, shadeKernel, measureKernel;
             public TextureHandle output, sky, diskFlux, blackbody, stars, spectrum, spectrumWeights, gasPowerLaw;
-            public BufferHandle trace, meter, exposureState;
-            public Vector4 camPos, camU, camRight, camUp, camForward, diskRange;
+            public BufferHandle trace, meter, exposureState, sceneNodes, sceneTriangles, sceneShading;
+            public Vector4 camPos, camU, camRight, camUp, camForward, diskRange, sceneSunDirection, sceneSun, sceneAmbient;
             public Matrix4x4 holeToWorld;
             public float spin, tanHalfFovY, aspect, farRadius, useSky, skyLuminance, diskOpacity, gasScale, diskSwirl, cloudTexture, gasSwirl;
             public float manualEV100, exposureCompensation, deltaTime, adaptationSpeed;
-            public int blackout, diskEnabled, diskShifts, blueStreams, autoExposure, meterCount, starSize, starLevels, gasView;
+            public int blackout, diskEnabled, diskShifts, blueStreams, autoExposure, meterCount, starSize, starLevels, gasView, sceneEnabled;
             public readonly int[] size = new int[2];
             public readonly Vector4[] gas = new Vector4[GasTables.ParameterCount];
             public readonly Vector4[] swirlTurns = new Vector4[SwirlTables.Size];
@@ -101,6 +101,8 @@ namespace SilkySeal.Kerr.Rendering
         KerrObserver _observer;
         AccretionDisk _disk;
         HotGas _gas;
+        LensedScene _scene;
+        SceneBuffers _noScene;
         Vector4 _diskRange;
         RTHandle _skyHandle, _diskFluxHandle, _blackbodyHandle, _starsHandle, _spectrumHandle, _spectrumWeightsHandle, _gasPowerLawHandle;
         Texture2D _blackbody, _spectrumWeights, _gasPowerLaw;
@@ -115,7 +117,7 @@ namespace SilkySeal.Kerr.Rendering
         }
 
         /// <summary>Called by the feature each frame before EnqueuePass.</summary>
-        public void Setup(ComputeShader shader, BlackHole hole, KerrObserver observer, AccretionDisk disk, HotGas gas)
+        public void Setup(ComputeShader shader, BlackHole hole, KerrObserver observer, AccretionDisk disk, HotGas gas, LensedScene scene)
         {
             if (_shader != shader)
             {
@@ -128,6 +130,7 @@ namespace SilkySeal.Kerr.Rendering
             _observer = observer;
             _disk = disk;
             _gas = gas;
+            _scene = scene;
         }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -164,6 +167,13 @@ namespace SilkySeal.Kerr.Rendering
             // Baked even with no gas: the trace kernel declares it, and Metal wants every declared texture bound.
             if (_gasPowerLaw == null) _gasPowerLaw = GasTables.BakePowerLaw();
             var gasPowerLaw = renderGraph.ImportTexture(Wrap(ref _gasPowerLawHandle, _gasPowerLaw));
+            // Placeholders with no scene, for the same reason: the trace kernel declares the buffers.
+            var sceneBuffers = _scene != null ? _scene.Buffers : null;
+            bool hasScene = sceneBuffers != null;
+            if (!hasScene) sceneBuffers = _noScene ??= SceneBuffers.Empty();
+            var sceneNodes = renderGraph.ImportBuffer(sceneBuffers.Nodes);
+            var sceneTriangles = renderGraph.ImportBuffer(sceneBuffers.Triangles);
+            var sceneShading = renderGraph.ImportBuffer(sceneBuffers.Shading);
 
             using (var builder = renderGraph.AddComputePass<PassData>("Kerr Trace", out var data))
             {
@@ -182,7 +192,16 @@ namespace SilkySeal.Kerr.Rendering
                 data.meter = meter;
                 data.meterCount = meterCount;
                 data.exposureState = exposureState;
+                data.sceneNodes = sceneNodes;
+                data.sceneTriangles = sceneTriangles;
+                data.sceneShading = sceneShading;
+                data.sceneEnabled = hasScene ? 1 : 0;
+                var light = hasScene ? _scene.Light() : default;
+                SceneBuffers.Light(light, out data.sceneSunDirection, out data.sceneSun, out data.sceneAmbient);
                 builder.UseBuffer(trace, AccessFlags.ReadWrite);
+                builder.UseBuffer(sceneNodes, AccessFlags.Read);
+                builder.UseBuffer(sceneTriangles, AccessFlags.Read);
+                builder.UseBuffer(sceneShading, AccessFlags.Read);
                 builder.UseBuffer(meter, AccessFlags.ReadWrite);
                 builder.UseBuffer(exposureState, AccessFlags.ReadWrite);
                 builder.UseTexture(output, AccessFlags.Write);
@@ -278,6 +297,13 @@ namespace SilkySeal.Kerr.Rendering
             cmd.SetComputeVectorArrayParam(d.shader, s_Gas, d.gas);
             cmd.SetComputeTextureParam(d.shader, d.traceKernel, s_GasPowerLaw, d.gasPowerLaw);
             cmd.SetComputeBufferParam(d.shader, d.traceKernel, s_Trace, d.trace);
+            cmd.SetComputeIntParam(d.shader, SceneBuffers.s_Enabled, d.sceneEnabled);
+            cmd.SetComputeVectorParam(d.shader, SceneBuffers.s_SunDirection, d.sceneSunDirection);
+            cmd.SetComputeVectorParam(d.shader, SceneBuffers.s_Sun, d.sceneSun);
+            cmd.SetComputeVectorParam(d.shader, SceneBuffers.s_Ambient, d.sceneAmbient);
+            cmd.SetComputeBufferParam(d.shader, d.traceKernel, SceneBuffers.s_Nodes, d.sceneNodes);
+            cmd.SetComputeBufferParam(d.shader, d.traceKernel, SceneBuffers.s_Triangles, d.sceneTriangles);
+            cmd.SetComputeBufferParam(d.shader, d.traceKernel, SceneBuffers.s_Shading, d.sceneShading);
             int groupsX = (d.size[0] + ThreadGroupSize - 1) / ThreadGroupSize, groupsY = (d.size[1] + ThreadGroupSize - 1) / ThreadGroupSize;
             cmd.DispatchCompute(d.shader, d.traceKernel, groupsX, groupsY, 1);
 
@@ -350,6 +376,8 @@ namespace SilkySeal.Kerr.Rendering
             _spectrumHandle?.Release();
             _spectrumWeightsHandle?.Release();
             _gasPowerLawHandle?.Release();
+            _noScene?.Dispose();
+            _noScene = null;
             _skyHandle = _diskFluxHandle = _blackbodyHandle = _starsHandle = _spectrumHandle = _spectrumWeightsHandle = _gasPowerLawHandle = null;
             CoreUtils.Destroy(_blackbody);
             CoreUtils.Destroy(_gasPowerLaw);

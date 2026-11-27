@@ -4,6 +4,7 @@
 #include "KerrSchild.hlsl"
 #include "Disk.hlsl"
 #include "Gas.hlsl"
+#include "Scene.hlsl"
 
 // Float32 mirror of Runtime/Core/GeodesicIntegrator.cs and RayTracer.Trace. Keep the two in step:
 // GpuParityTests compares them ray by ray.
@@ -93,15 +94,18 @@ float4 EquatorCrossing(float4 x0, float4 v0, float4 x1, float4 v1)
 }
 
 // Traces a past-directed null covector kLower = (p_x, p_y, p_z, p_t) from x0, shading the disk on the way when
-// _DiskEnabled and the hot gas when _GasView is on. radiance is the disk and eye-view gas light collected,
-// transmittance what still shows of the sky behind it; gas carries the 230 GHz Stokes parameters.
+// _DiskEnabled, the hot gas when _GasView is on and the meshes near the hole when _SceneEnabled. radiance is the disk
+// and eye-view gas light collected, transmittance what still shows of the sky behind it; gas carries the 230 GHz Stokes
+// parameters. scene is the light of the mesh the ray ended on, unshifted and times what showed through to it, and its
+// shift g = ν_observed / ν_emitted; g is 0 where the ray met none (or met one inside the ergosphere, which shows black).
 // Cost: at most maxSteps × 6 gradient evaluations. Capture as in RayTracer.Trace: at r₊ + margin on the way in, and at
 // once from inside r₊ when E − Ω_H L < 0, light the chart cannot follow back.
 void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRadius, int maxSteps, inout KerrGasRay gas,
-              out float3 skyDir, out int status, out float3 radiance, out float transmittance)
+              out float3 skyDir, out int status, out float3 radiance, out float transmittance, out float4 scene)
 {
     radiance = 0.0;
     transmittance = 1.0;
+    scene = 0.0;
     float horizon = KerrHorizonRadius(spin), captureRadius = horizon + KERR_HORIZON_MARGIN;
     float3 x = x0;
     float3 p = kLower.xyz;
@@ -109,6 +113,7 @@ void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRa
     float r = KerrRadius(x0, spin), previous = r;
     float h = KERR_INITIAL_STEP_PER_RADIUS * r;
     float time = 0.0; // Kerr-Schild coordinate time relative to the camera
+    float sceneReach = _SceneEnabled != 0 ? KerrSceneReach() : 0.0;
 
     status = KERR_STATUS_MAX_STEPS;
     if (r < horizon && pt + spin / (2.0 * horizon) * (x.x * p.y - x.y * p.x) < 0.0)
@@ -139,6 +144,23 @@ void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRa
                 status = KERR_STATUS_ABSORBED;
                 break;
             }
+        }
+        // Mirror of SceneRay.OnStep: the step's chord against the meshes, after the disk as on the CPU; near them, the
+        // next chord kept short enough to follow the bend.
+        if (_SceneEnabled != 0)
+        {
+            int slot;
+            float t, u, v;
+            float3 chord = x - before.xyz;
+            if (KerrSceneHit(before.xyz, x, slot, t, u, v))
+            {
+                scene = float4(transmittance * KerrSceneShade(slot, u, v, chord), KerrSceneShift(before.xyz + chord * t, pt, spin));
+                transmittance = 0.0;
+                status = KERR_STATUS_ABSORBED;
+                break;
+            }
+            float span = length(chord), radius = length(x);
+            if (span > 0.0 && radius - span < sceneReach) h = min(h, stepSize * KERR_SCENE_CHORD * radius / span);
         }
         if (_GasView != KERR_GAS_OFF) KerrGasStep(gas, x, time, float4(p, pt), spin, stepSize, h, transmittance);
     }

@@ -27,7 +27,8 @@ int2 _Size;
 RWStructuredBuffer<float4> _Directions;
 
 // CSTrace to CSShade, two float4 per pixel: (world sky direction, g) then (disk radiance, transmittance).
-// g is the sky's frequency shift, observed over emitted; 0 where the ray did not escape.
+// g is the sky's frequency shift, observed over emitted; 0 where the ray did not escape. A ray that ended on a mesh
+// stores (its light unshifted, −g) in the first instead: the shift needs the spectrum tables only CSShade binds.
 RWStructuredBuffer<float4> _Trace;
 int _Blackout;
 float4x4 _HoleToWorld;
@@ -79,10 +80,11 @@ void CSTraceDirections(uint3 id : SV_DispatchThreadID)
 {
     if (any(id.xy >= (uint2)_Size)) return;
     float3 skyDir, radiance, d;
+    float4 scene;
     float transmittance;
     int status;
     KerrGasRay gas = KerrGasRayStart();
-    TraceRay(_CamPos, PixelRay(id.xy, d), _Spin, _Tolerance, _FarRadius, _MaxSteps, gas, skyDir, status, radiance, transmittance);
+    TraceRay(_CamPos, PixelRay(id.xy, d), _Spin, _Tolerance, _FarRadius, _MaxSteps, gas, skyDir, status, radiance, transmittance, scene);
     _Directions[id.y * _Size.x + id.x] = float4(skyDir, status);
 }
 
@@ -99,15 +101,20 @@ void CSTrace(uint3 id : SV_DispatchThreadID)
     {
         int status;
         float3 d;
-        float4 k = PixelRay(id.xy, d);
+        float4 k = PixelRay(id.xy, d), scene;
         if (_GasView == KERR_GAS_POLARIZATION) gas.screen = KerrGasScreen(d);
-        TraceRay(_CamPos, k, _Spin, _Tolerance, _FarRadius, _MaxSteps, gas, skyDir, status, radiance, transmittance);
+        TraceRay(_CamPos, k, _Spin, _Tolerance, _FarRadius, _MaxSteps, gas, skyDir, status, radiance, transmittance, scene);
         if (status == KERR_STATUS_ESCAPED && _GasView <= KERR_GAS_EYE)
         {
             // k·u = 1 at the camera and k_t is conserved, so a source at rest far away sees the ray shifted by 1 / k_t.
             g = 1.0 / k.w;
             // Kerr-Schild (x, y, z) is hole-local (x, z, y); the matrix may carry scale, so renormalize.
             skyDir = normalize(mul((float3x3)_HoleToWorld, skyDir.xzy));
+        }
+        else if (scene.w > 0.0 && _GasView <= KERR_GAS_EYE)
+        {
+            skyDir = scene.rgb;
+            g = -scene.w;
         }
         else skyDir = 0.0;
     }
@@ -147,7 +154,7 @@ void KerrFootprint(int2 p, float3 centre, out float3 jx, out float3 jy)
 }
 
 // Lensed frame from the trace: disk light in front of the sky and stars, both filtered over the pixel's footprint and
-// shifted by the ray's g. Output is scene luminance times last frame's exposure, clamped below the RGBA16F maximum so
+// shifted by the ray's g, or in front of the mesh the ray ended on. Output is scene luminance times last frame's exposure, clamped below the RGBA16F maximum so
 // bloom never sees infinity; each 4th pixel's unexposed luminance also goes to the meter.
 [numthreads(8, 8, 1)]
 void CSShade(uint3 id : SV_DispatchThreadID)
@@ -170,6 +177,7 @@ void CSShade(uint3 id : SV_DispatchThreadID)
         float3 background = _UseSky > 0.5 ? _Sky.SampleGrad(sampler_Sky, sky.xyz, jx, jy).rgb : KerrGridSky(sky.xyz);
         color += disk.a * (_SkyLuminance * KerrShiftRgb(background, sky.w) + KerrStarRadiance(sky.xyz, jx, jy, sky.w));
     }
+    else if (sky.w < 0.0) color += KerrShiftRgb(sky.rgb, -sky.w);
     if (all(id.xy % KERR_METER_STRIDE == 0))
     {
         uint meterWidth = (_Size.x + KERR_METER_STRIDE - 1) / KERR_METER_STRIDE;
