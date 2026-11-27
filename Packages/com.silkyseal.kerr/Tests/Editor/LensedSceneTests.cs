@@ -3,6 +3,7 @@ using NUnit.Framework;
 using SilkySeal.Kerr.Rendering;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace SilkySeal.Kerr.Tests
 {
@@ -127,13 +128,50 @@ namespace SilkySeal.Kerr.Tests
             Assert.AreEqual(3, light.Luminance);
         }
 
-        void Cube(Vector3 position, Color colour)
+        // The far cube is captured from the hole's centre, 2 units per M: its near face lies 145 M out along world +x and
+        // a little above, where face 0 of the capture looks. The green cube in front of it is within 50 M, traced
+        // instead, so the capture must see straight past it to the red one.
+        [Test]
+        public void Scenery_ShowsFarMeshesWhereTheyLie_AndLeavesNearOnesOut()
+        {
+            Cube(HolePosition + new Vector3(300, 60, 0), Color.red, "Universal Render Pipeline/Unlit").transform.localScale = 20 * Vector3.one;
+            Cube(HolePosition + new Vector3(40, 8, 0), Color.green, "Universal Render Pipeline/Unlit").transform.localScale = 4 * Vector3.one;
+            var so = new SerializedObject(_scene);
+            so.FindProperty("scenerySize").intValue = Size;
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            _scene.Rebuild();
+            _scene.CaptureScenery();
+
+            var face = Read(_scene.Scenery, 0);
+            var above = face[Texel(0.5f, 0.5f + 0.5f * 60 / 290f)];
+            Assert.AreEqual(new Vector2(290, 60).magnitude / 2, above.w, 1, "distance in M to the red cube's near face");
+            Assert.Greater(above.x, 0.5f, "red");
+            Assert.Less(above.y, 0.1f, "not the green cube in front");
+            Assert.Greater(face[Texel(0.5f, 0.5f - 0.5f * 60 / 290f)].w, 1e5f, "nothing below: the face is not upside down");
+            Assert.Greater(Read(_scene.Scenery, 1)[Texel(0.5f, 0.5f)].w, 1e5f, "nothing behind");
+        }
+
+        const int Size = 64;
+
+        static int Texel(float u, float v) => (int)(v * Size) * Size + (int)(u * Size);
+
+        static Vector4[] Read(RenderTexture array, int face)
+        {
+            var request = AsyncGPUReadback.Request(array, 0, 0, Size, 0, Size, face, 1);
+            request.WaitForCompletion();
+            Assert.IsFalse(request.hasError);
+            return request.GetData<Vector4>().ToArray();
+        }
+
+        GameObject Cube(Vector3 position, Color colour, string shader = "Universal Render Pipeline/Lit")
         {
             var go = Make(GameObject.CreatePrimitive(PrimitiveType.Cube));
             go.transform.position = position;
-            var material = Make(new Material(Shader.Find("Universal Render Pipeline/Lit")));
+            var material = Make(new Material(Shader.Find(shader)));
             material.SetColor("_BaseColor", colour);
             go.GetComponent<MeshRenderer>().sharedMaterial = material;
+            return go;
         }
 
         T Make<T>(T o) where T : Object

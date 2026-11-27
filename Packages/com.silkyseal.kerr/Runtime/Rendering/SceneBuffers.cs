@@ -18,6 +18,13 @@ namespace SilkySeal.Kerr.Rendering
         internal static readonly int s_SunDirection = Shader.PropertyToID("_SceneSunDirection");
         internal static readonly int s_Sun = Shader.PropertyToID("_SceneSun");
         internal static readonly int s_Ambient = Shader.PropertyToID("_SceneAmbient");
+        internal static readonly int s_Scenery = Shader.PropertyToID("_Scenery");
+        internal static readonly int s_SceneryEnabled = Shader.PropertyToID("_SceneryEnabled");
+        internal static readonly int s_SceneryNear = Shader.PropertyToID("_SceneryNear");
+        internal static readonly int s_SceneryFar = Shader.PropertyToID("_SceneryFar");
+        internal static readonly int s_SceneryLuminance = Shader.PropertyToID("_SceneryLuminance");
+
+        static Texture2DArray s_NoScenery;
 
         public readonly GraphicsBuffer Nodes, Triangles, Shading;
 
@@ -63,11 +70,28 @@ namespace SilkySeal.Kerr.Rendering
             return new SceneBuffers(nodes, triangles, shading);
         }
 
+        /// <summary>A scenery map with nothing in it, for the kernel's scenery slot while the scenery is off.</summary>
+        internal static Texture2DArray NoScenery
+        {
+            get
+            {
+                if (s_NoScenery != null) return s_NoScenery;
+                s_NoScenery = new Texture2DArray(1, 1, LensedScene.Faces.Length, TextureFormat.RGBAFloat, false, true)
+                {
+                    name = "Kerr No Scenery", hideFlags = HideFlags.HideAndDontSave,
+                };
+                s_NoScenery.Apply(false, true);
+                return s_NoScenery;
+            }
+        }
+
+        /// <summary>Binds these surfaces, and no scenery, for a kernel dispatched outside the lensing pass.</summary>
         public void Bind(ComputeShader shader, int kernel)
         {
             shader.SetBuffer(kernel, s_Nodes, Nodes);
             shader.SetBuffer(kernel, s_Triangles, Triangles);
             shader.SetBuffer(kernel, s_Shading, Shading);
+            shader.SetTexture(kernel, s_Scenery, NoScenery);
         }
 
         /// <summary>The scene's light as the kernel takes it, luminance folded in. Directions in Kerr-Schild axes.</summary>

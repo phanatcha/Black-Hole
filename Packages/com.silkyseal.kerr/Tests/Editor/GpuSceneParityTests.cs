@@ -34,6 +34,48 @@ namespace SilkySeal.Kerr.Tests
             var gpu = RunGpu(shader, frame, surfaces);
             var cpu = RunCpu(frame, surfaces);
 
+            AssertMatches(cpu, gpu, $"a={a}");
+        }
+
+        // A captured shell 200 M out on every side, in one colour: every ray that escapes the hole meets it, shifted as
+        // light from rest at r = 200 (a = 0). The double tracer says which rays escape, and their k_t.
+        [Test]
+        public void Scenery_ShellAroundTheHole_ShowsInEveryEscapingPixel()
+        {
+            const double shell = 200, luminance = 2;
+            var colour = new Color(0.6f, 0.4f, 0.2f, (float)shell);
+            var shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(ShaderPath);
+            var frame = TestFrame(0);
+            var map = new Texture2DArray(4, 4, LensedScene.Faces.Length, TextureFormat.RGBAFloat, false, true);
+            try
+            {
+                var texels = new Color[16];
+                Array.Fill(texels, colour);
+                for (int face = 0; face < LensedScene.Faces.Length; face++) map.SetPixels(texels, face);
+                map.Apply();
+                var gpu = RunGpu(shader, frame, null, map, luminance);
+
+                var cpu = new Vector3d[GridWidth * GridHeight];
+                var settings = TraceSettings.Reference(0);
+                double tanHalf = Math.Tan(VerticalFov / 2);
+                Parallel.For(0, cpu.Length, i =>
+                {
+                    var k = RayTracer.PixelRay(frame, Ndc(i % GridWidth, GridWidth), Ndc(i / GridWidth, GridHeight), tanHalf, Aspect);
+                    if (RayTracer.Trace(frame.Position, k, settings).Status != RayStatus.Escaped) return;
+                    var light = new Vector3d(colour.r, colour.g, colour.b) * luminance;
+                    cpu[i] = RgbSpectrum.Shift(light, Math.Sqrt(1 - 2 / shell) / k.T);
+                });
+
+                AssertMatches(cpu, gpu, "shell");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(map);
+            }
+        }
+
+        static void AssertMatches(Vector3d[] cpu, Vector4[] gpu, string label)
+        {
             int lit = 0, matched = 0, missed = 0;
             double worst = 0;
             var diag = new List<string>();
@@ -54,7 +96,7 @@ namespace SilkySeal.Kerr.Tests
 
             double fraction = (double)matched / lit;
             string report = $"within {ColourTolerance:P0}: {fraction:P3} of {lit} lit; {missed} one-sided, worst {worst:P1}; " + string.Join("; ", diag);
-            Debug.Log($"[GpuSceneParity a={a}] {report}");
+            Debug.Log($"[GpuSceneParity {label}] {report}");
             Assert.Greater(lit, cpu.Length / 5, "the scene should fill a good part of the frame");
             Assert.GreaterOrEqual(fraction, RequiredMatchFraction, report);
         }
@@ -108,12 +150,13 @@ namespace SilkySeal.Kerr.Tests
             return results;
         }
 
-        // CSTrace with the scene bound, then CSShade with no sky and no stars at exposure 1.
-        static Vector4[] RunGpu(ComputeShader shader, CameraFrame frame, SceneSurfaces surfaces)
+        // CSTrace with the meshes and the scenery map bound (either may be null), then CSShade with no sky and no stars
+        // at exposure 1. The scenery starts at 50 M.
+        static Vector4[] RunGpu(ComputeShader shader, CameraFrame frame, SceneSurfaces surfaces, Texture scenery = null, double sceneryLuminance = 1)
         {
             int kernel = shader.FindKernel("CSTrace");
             var trace = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2 * GridWidth * GridHeight, 4 * sizeof(float));
-            var scene = SceneBuffers.Create(surfaces);
+            var scene = surfaces != null ? SceneBuffers.Create(surfaces) : SceneBuffers.Empty();
             try
             {
                 SetCamera(shader, frame);
@@ -127,7 +170,15 @@ namespace SilkySeal.Kerr.Tests
                 shader.SetBuffer(kernel, "_Trace", trace);
                 scene.Bind(shader, kernel);
                 SceneBuffers.SetLight(shader, Light);
-                shader.SetInt("_SceneEnabled", 1);
+                shader.SetInt("_SceneEnabled", surfaces != null ? 1 : 0);
+                if (scenery != null)
+                {
+                    shader.SetTexture(kernel, "_Scenery", scenery);
+                    shader.SetInt("_SceneryEnabled", 1);
+                    shader.SetFloat("_SceneryNear", 50);
+                    shader.SetFloat("_SceneryFar", 1000);
+                    shader.SetFloat("_SceneryLuminance", (float)sceneryLuminance);
+                }
                 Dispatch(shader, kernel);
 
                 var traced = new Vector4[2 * GridWidth * GridHeight];
@@ -138,6 +189,7 @@ namespace SilkySeal.Kerr.Tests
             {
                 // Compute parameters persist on the asset; leave the scene off for the other kernels' tests.
                 shader.SetInt("_SceneEnabled", 0);
+                shader.SetInt("_SceneryEnabled", 0);
                 trace.Release();
                 scene.Dispose();
             }

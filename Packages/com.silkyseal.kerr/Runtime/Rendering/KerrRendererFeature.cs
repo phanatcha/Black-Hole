@@ -14,19 +14,29 @@ namespace SilkySeal.Kerr.Rendering
         [SerializeField] ComputeShader traceShader;
 
         KerrLensingPass _pass;
+        SceneryCapturePass _capturePass;
 
         public override void Create()
         {
             _pass = new KerrLensingPass();
+            _capturePass = new SceneryCapturePass();
             if (traceShader == null)
                 Debug.LogWarning($"{nameof(KerrRendererFeature)} '{name}' has no trace shader; black-hole lensing is off.", this);
         }
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            if (traceShader == null || BlackHole.Active.Count == 0) return;
-
+            if (traceShader == null) return;
             ref var cameraData = ref renderingData.cameraData;
+            var capturing = LensedScene.Capturing;
+            if (capturing != null && cameraData.camera == capturing.CaptureCamera)
+            {
+                _capturePass.Setup(traceShader, capturing);
+                renderer.EnqueuePass(_capturePass);
+                return;
+            }
+
+            if (BlackHole.Active.Count == 0) return;
             if (cameraData.cameraType != CameraType.Game) return;
             // TryGetComponent: GetComponent allocates a fake-null object in the Editor when nothing is found.
             if (!cameraData.camera.TryGetComponent(out KerrObserver observer) || !observer.isActiveAndEnabled) return;
@@ -44,6 +54,8 @@ namespace SilkySeal.Kerr.Rendering
         {
             _pass?.Dispose();
             _pass = null;
+            _capturePass?.Dispose();
+            _capturePass = null;
         }
     }
 }

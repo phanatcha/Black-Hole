@@ -3,6 +3,7 @@
 #pragma kernel CSTrace
 #pragma kernel CSShade
 #pragma kernel CSMeasureExposure
+#pragma kernel CSCaptureScenery
 
 #include "Geodesic.hlsl"
 #include "Sky.hlsl"
@@ -184,6 +185,32 @@ void CSShade(uint3 id : SV_DispatchThreadID)
         _MeterSamples[(id.y / KERR_METER_STRIDE) * meterWidth + id.x / KERR_METER_STRIDE] = KerrLuminance(color);
     }
     _Output[id.xy] = float4(min(color * KerrExposure(), 65000.0), 1.0);
+}
+
+// CSCaptureScenery only: one face of LensedScene's scenery map, from its capture camera's colour and depth.
+Texture2D<float4> _CaptureColour;
+Texture2D<float> _CaptureDepth;
+RWTexture2DArray<float4> _SceneryOut;
+int _CaptureFace;
+int _CaptureSize;
+float4 _CaptureZBuffer;  // the capture camera's _ZBufferParams
+float _CaptureFarDepth;  // raw depth where nothing was drawn
+float _CaptureToM;       // M per world unit
+
+[numthreads(8, 8, 1)]
+void CSCaptureScenery(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint)_CaptureSize)) return;
+    uint2 colourSize, depthSize;
+    _CaptureColour.GetDimensions(colourSize.x, colourSize.y);
+    _CaptureDepth.GetDimensions(depthSize.x, depthSize.y);
+    float2 uv = (id.xy + 0.5) / _CaptureSize;
+    float raw = _CaptureDepth[uint2(uv * depthSize)];
+    float2 ndc = uv * 2.0 - 1.0;
+    // Linear depth along the face's axis, then along the ray through the texel: the field of view is 90°.
+    float distance = raw == _CaptureFarDepth ? KERR_SCENERY_NONE
+                   : _CaptureToM * sqrt(1.0 + dot(ndc, ndc)) / (_CaptureZBuffer.z * raw + _CaptureZBuffer.w);
+    _SceneryOut[uint3(id.xy, _CaptureFace)] = float4(_CaptureColour[uint2(uv * colourSize)].rgb, distance);
 }
 
 // Eye adaptation from this frame's meter samples into the EV100 state the next frame is exposed with. One group.

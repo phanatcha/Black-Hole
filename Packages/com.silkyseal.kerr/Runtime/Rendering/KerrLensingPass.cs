@@ -81,13 +81,13 @@ namespace SilkySeal.Kerr.Rendering
         {
             public ComputeShader shader;
             public int traceKernel, shadeKernel, measureKernel;
-            public TextureHandle output, sky, diskFlux, blackbody, stars, spectrum, spectrumWeights, gasPowerLaw;
+            public TextureHandle output, sky, diskFlux, blackbody, stars, spectrum, spectrumWeights, gasPowerLaw, scenery;
             public BufferHandle trace, meter, exposureState, sceneNodes, sceneTriangles, sceneShading;
             public Vector4 camPos, camU, camRight, camUp, camForward, diskRange, sceneSunDirection, sceneSun, sceneAmbient;
             public Matrix4x4 holeToWorld;
             public float spin, tanHalfFovY, aspect, farRadius, useSky, skyLuminance, diskOpacity, gasScale, diskSwirl, cloudTexture, gasSwirl;
-            public float manualEV100, exposureCompensation, deltaTime, adaptationSpeed;
-            public int blackout, diskEnabled, diskShifts, blueStreams, autoExposure, meterCount, starSize, starLevels, gasView, sceneEnabled;
+            public float manualEV100, exposureCompensation, deltaTime, adaptationSpeed, sceneryNear, sceneryFar, sceneryLuminance;
+            public int blackout, diskEnabled, diskShifts, blueStreams, autoExposure, meterCount, starSize, starLevels, gasView, sceneEnabled, sceneryEnabled;
             public readonly int[] size = new int[2];
             public readonly Vector4[] gas = new Vector4[GasTables.ParameterCount];
             public readonly Vector4[] swirlTurns = new Vector4[SwirlTables.Size];
@@ -104,7 +104,7 @@ namespace SilkySeal.Kerr.Rendering
         LensedScene _scene;
         SceneBuffers _noScene;
         Vector4 _diskRange;
-        RTHandle _skyHandle, _diskFluxHandle, _blackbodyHandle, _starsHandle, _spectrumHandle, _spectrumWeightsHandle, _gasPowerLawHandle;
+        RTHandle _skyHandle, _diskFluxHandle, _blackbodyHandle, _starsHandle, _spectrumHandle, _spectrumWeightsHandle, _gasPowerLawHandle, _sceneryHandle;
         Texture2D _blackbody, _spectrumWeights, _gasPowerLaw;
         Texture2DArray _stars, _spectrum;
         TextAsset _starsSource;
@@ -174,6 +174,9 @@ namespace SilkySeal.Kerr.Rendering
             var sceneNodes = renderGraph.ImportBuffer(sceneBuffers.Nodes);
             var sceneTriangles = renderGraph.ImportBuffer(sceneBuffers.Triangles);
             var sceneShading = renderGraph.ImportBuffer(sceneBuffers.Shading);
+            Texture sceneryMap = _scene != null ? _scene.Scenery : null;
+            bool hasScenery = sceneryMap != null;
+            var scenery = renderGraph.ImportTexture(Wrap(ref _sceneryHandle, hasScenery ? sceneryMap : SceneBuffers.NoScenery));
 
             using (var builder = renderGraph.AddComputePass<PassData>("Kerr Trace", out var data))
             {
@@ -198,6 +201,14 @@ namespace SilkySeal.Kerr.Rendering
                 data.sceneEnabled = hasScene ? 1 : 0;
                 var light = hasScene ? _scene.Light() : default;
                 SceneBuffers.Light(light, out data.sceneSunDirection, out data.sceneSun, out data.sceneAmbient);
+                data.scenery = scenery;
+                data.sceneryEnabled = hasScenery ? 1 : 0;
+                data.sceneryNear = hasScenery ? _scene.Radius : 0;
+                data.sceneryFar = hasScenery ? _scene.SceneryRadius : 0;
+                data.sceneryLuminance = hasScenery ? _scene.Luminance : 0;
+                // Rays must reach the far edge of the scenery before they count as escaped.
+                if (hasScenery) data.farRadius = Mathf.Max(data.farRadius, 1.01f * _scene.SceneryRadius);
+                builder.UseTexture(scenery, AccessFlags.Read);
                 builder.UseBuffer(trace, AccessFlags.ReadWrite);
                 builder.UseBuffer(sceneNodes, AccessFlags.Read);
                 builder.UseBuffer(sceneTriangles, AccessFlags.Read);
@@ -304,6 +315,11 @@ namespace SilkySeal.Kerr.Rendering
             cmd.SetComputeBufferParam(d.shader, d.traceKernel, SceneBuffers.s_Nodes, d.sceneNodes);
             cmd.SetComputeBufferParam(d.shader, d.traceKernel, SceneBuffers.s_Triangles, d.sceneTriangles);
             cmd.SetComputeBufferParam(d.shader, d.traceKernel, SceneBuffers.s_Shading, d.sceneShading);
+            cmd.SetComputeIntParam(d.shader, SceneBuffers.s_SceneryEnabled, d.sceneryEnabled);
+            cmd.SetComputeFloatParam(d.shader, SceneBuffers.s_SceneryNear, d.sceneryNear);
+            cmd.SetComputeFloatParam(d.shader, SceneBuffers.s_SceneryFar, d.sceneryFar);
+            cmd.SetComputeFloatParam(d.shader, SceneBuffers.s_SceneryLuminance, d.sceneryLuminance);
+            cmd.SetComputeTextureParam(d.shader, d.traceKernel, SceneBuffers.s_Scenery, d.scenery);
             int groupsX = (d.size[0] + ThreadGroupSize - 1) / ThreadGroupSize, groupsY = (d.size[1] + ThreadGroupSize - 1) / ThreadGroupSize;
             cmd.DispatchCompute(d.shader, d.traceKernel, groupsX, groupsY, 1);
 
@@ -378,7 +394,8 @@ namespace SilkySeal.Kerr.Rendering
             _gasPowerLawHandle?.Release();
             _noScene?.Dispose();
             _noScene = null;
-            _skyHandle = _diskFluxHandle = _blackbodyHandle = _starsHandle = _spectrumHandle = _spectrumWeightsHandle = _gasPowerLawHandle = null;
+            _sceneryHandle?.Release();
+            _skyHandle = _diskFluxHandle = _blackbodyHandle = _starsHandle = _spectrumHandle = _spectrumWeightsHandle = _gasPowerLawHandle = _sceneryHandle = null;
             CoreUtils.Destroy(_blackbody);
             CoreUtils.Destroy(_gasPowerLaw);
             _gasPowerLaw = null;

@@ -114,6 +114,7 @@ void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRa
     float h = KERR_INITIAL_STEP_PER_RADIUS * r;
     float time = 0.0; // Kerr-Schild coordinate time relative to the camera
     float sceneReach = _SceneEnabled != 0 ? KerrSceneReach() : 0.0;
+    float sceneryBefore = _SceneryEnabled != 0 ? KerrScenerySide(x0) : -1.0;
 
     status = KERR_STATUS_MAX_STEPS;
     if (r < horizon && pt + spin / (2.0 * horizon) * (x.x * p.y - x.y * p.x) < 0.0)
@@ -161,6 +162,23 @@ void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRa
             }
             float span = length(chord), radius = length(x);
             if (span > 0.0 && radius - span < sceneReach) h = min(h, stepSize * KERR_SCENE_CHORD * radius / span);
+        }
+        // The scenery map beyond them: the ray meets it where it goes from in front of the captured distance to past it.
+        if (_SceneryEnabled != 0)
+        {
+            float side = KerrScenerySide(x);
+            if (sceneryBefore < 0.0 && side >= 0.0)
+            {
+                float3 at = KerrSceneryCrossing(before.xyz, x);
+                scene = float4(transmittance * _SceneryLuminance * KerrScenery(at).rgb, KerrSceneShift(at, pt, spin));
+                transmittance = 0.0;
+                status = KERR_STATUS_ABSORBED;
+                break;
+            }
+            sceneryBefore = side;
+            float span = length(x - before.xyz), radius = length(x);
+            if (span > 0.0 && radius + span > _SceneryNear && radius - span < _SceneryFar)
+                h = min(h, stepSize * KERR_SCENERY_CHORD * radius / span);
         }
         if (_GasView != KERR_GAS_OFF) KerrGasStep(gas, x, time, float4(p, pt), spin, stepSize, h, transmittance);
     }
