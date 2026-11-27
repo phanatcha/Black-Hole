@@ -50,17 +50,13 @@ namespace SilkySeal.Kerr
     /// Stops a ray at the first surface it meets, testing each integrator step as a straight chord, and shades it.
     /// The surfaces are at rest in the hole's static frame: their light reaches the camera shifted by
     /// g = √(−g_tt) / k_t, which no static surface has inside the ergosphere (it shows black there).
-    /// Within a chord of the surfaces' reach it keeps each chord under <see cref="MaxChordPerRadius"/> × r: a straight
-    /// chord sags off the bending ray, and the step size alone would make that sag the tracer's, not the scene's.
+    /// At the reference tolerance the steps are short enough that a chord follows the bend; the GPU's are not (Scene.hlsl).
     /// </summary>
     public struct SceneRay : IRayObserver
     {
-        /// <summary>Longest chord near the surfaces, per unit distance from the hole's centre. Scene.hlsl keeps the same.</summary>
-        public const double MaxChordPerRadius = 0.02;
-
         readonly SceneSurfaces _surfaces;
         readonly SceneLight _light;
-        readonly double _spin, _reach;
+        readonly double _spin;
         Vector3d _previous;
 
         public bool Hit;
@@ -76,7 +72,6 @@ namespace SilkySeal.Kerr
             _surfaces = surfaces;
             _light = light;
             _spin = spin;
-            _reach = Reach(surfaces.Bvh);
             _previous = default;
             Hit = false;
             Surface = default;
@@ -91,13 +86,7 @@ namespace SilkySeal.Kerr
         {
             var from = _previous;
             _previous = x;
-            if (h == 0) return true;
-            if (!_surfaces.Bvh.Intersect(from, x, out var hit))
-            {
-                double chord = (x - from).Length, radius = x.Length;
-                if (chord > 0 && radius - chord < _reach) nextStep = Math.Min(nextStep, h * MaxChordPerRadius * radius / chord);
-                return true;
-            }
+            if (h == 0 || !_surfaces.Bvh.Intersect(from, x, out var hit)) return true;
 
             Hit = true;
             Surface = hit;
@@ -108,12 +97,5 @@ namespace SilkySeal.Kerr
             return false;
         }
 
-        /// <summary>Farthest any surface can lie from the hole's centre: the root box's farthest corner.</summary>
-        internal static double Reach(SceneBvh bvh)
-        {
-            var root = bvh.Nodes[0];
-            return new Vector3d(Math.Max(Math.Abs(root.Min.X), Math.Abs(root.Max.X)), Math.Max(Math.Abs(root.Min.Y), Math.Abs(root.Max.Y)),
-                                Math.Max(Math.Abs(root.Min.Z), Math.Abs(root.Max.Z))).Length;
-        }
     }
 }

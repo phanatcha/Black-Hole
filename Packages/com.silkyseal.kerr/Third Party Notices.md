@@ -53,6 +53,11 @@ The code is written for this package. These are the methods it implements.
 - The plunge and its two scripted falls: NASA Scientific Visualization Studio 14576, Schnittman & Powell 2024,
   https://svs.gsfc.nasa.gov/14576. Written here from its description; no code or frames were used.
 - Zoom-whirl orbits: Levin & Perez-Giz 2008, Phys. Rev. D 77, 103005.
+- Meshes near the hole: ray–triangle test from Möller & Trumbore 1997, J. Graph. Tools 2(1), 21; ray–box slab test
+  from Kay & Kajiya 1986, Comput. Graph. 20(4), 269 (SIGGRAPH '86).
+- Scenery beyond them: a cube map of colour and distance searched along the ray, the idea of Szirmay-Kalos, Aszódi,
+  Lazányi & Premecz 2005, *Approximate Ray-Tracing on the GPU with Distance Impostors*, Comput. Graph. Forum 24(3),
+  695. Written here for bent rays; its code was not used.
 
 The tests check the renderer against these:
 
@@ -64,3 +69,4 @@ The tests check the renderer against these:
 - Sgr A* ring size: Event Horizon Telescope Collaboration 2022, ApJL 930, L12.
 - Polarization twist β2: Palumbo, Wong & Prather 2020, ApJ 894, 156.
 - Falling from rest far away (the rain frame): Hamilton & Lisle 2008, Am. J. Phys. 76, 519.
+- Einstein ring angle in the weak field: Einstein 1936, Science 84, 506.

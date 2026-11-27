@@ -9,10 +9,13 @@
 
 // Deepest stack a query needs: the median-split tree is about log₂(triangles / 4) deep.
 #define KERR_SCENE_STACK 32
-// SceneRay.MaxChordPerRadius: longest chord near the meshes, per unit distance from the hole's centre.
+// Where a step's chord hits a mesh, its curve is tested in pieces this long, per unit distance from the hole's
+// centre, at most KERR_SCENE_PIECES of them: a straight chord across the whole step sags off the bend.
 #define KERR_SCENE_CHORD 0.02
-// Longest chord through the scenery, per unit distance: the map is only sampled at the chords' ends.
-#define KERR_SCENERY_CHORD 0.05
+#define KERR_SCENE_PIECES 16
+// The scenery map is sampled along each step this often, per unit distance, so thin things between its ends show.
+#define KERR_SCENERY_CHORD 0.1
+#define KERR_SCENERY_PIECES 32
 // Distance stored where the scenery capture drew nothing.
 #define KERR_SCENERY_NONE 1e6
 #define KERR_SCENERY_BISECTIONS 8
@@ -99,12 +102,6 @@ bool KerrSceneHit(float3 from, float3 to, out int slot, out float t, out float u
         if (nearT <= 1.0 && top < KERR_SCENE_STACK) stack[top++] = nearChild;
     }
     return slot >= 0;
-}
-
-// Farthest any mesh can lie from the hole's centre: the root box's farthest corner. Mirror of SceneRay.Reach.
-float KerrSceneReach()
-{
-    return length(max(abs(_SceneNodes[0].xyz), abs(_SceneNodes[1].xyz)));
 }
 
 // Texture coordinates and face of direction v in the hole's local Unity axes. Faces as LensedScene.Faces.
