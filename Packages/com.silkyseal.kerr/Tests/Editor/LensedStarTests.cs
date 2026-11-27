@@ -1,5 +1,6 @@
 using System;
 using NUnit.Framework;
+using SilkySeal.Kerr.Rendering;
 using UnityEditor;
 using UnityEngine;
 using static SilkySeal.Kerr.Tests.GpuParityTests;
@@ -135,6 +136,7 @@ namespace SilkySeal.Kerr.Tests
         {
             int kernel = shader.FindKernel("CSTrace");
             var trace = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 2 * size * size, 4 * sizeof(float));
+            using var scene = SceneBuffers.Empty(); // declared by TraceRay; Metal wants it bound
             try
             {
                 SetCamera(shader, frame);
@@ -149,6 +151,7 @@ namespace SilkySeal.Kerr.Tests
                 shader.SetInt("_Blackout", 0);
                 shader.SetMatrix("_HoleToWorld", Matrix4x4.identity);
                 shader.SetBuffer(kernel, "_Trace", trace);
+                scene.Bind(shader, kernel);
                 shader.Dispatch(kernel, (size + 7) / 8, (size + 7) / 8, 1);
                 var traced = new Vector4[2 * size * size];
                 trace.GetData(traced);

@@ -34,6 +34,10 @@ Method: `Camera.Render()` into a 1920×1080 HDR render texture, 20 frames after 
 | 2026-11-26 | Apple M2 Pro, Metal, Unity 6000.4.1f1 | 6 (falling, 0.1 M inside r₊, toward the hole) | 0.6 | 72.3 | 14 |
 | 2026-11-26 | Apple M2 Pro, Metal, Unity 6000.4.1f1 | 6 (falling, 0.1 M inside r₊, looking back and up) | 0.6 | 31.8 | 31 |
 | 2026-11-26 | Apple M2 Pro, Metal, Unity 6000.4.1f1 | 6 (falling, 0.03 M above r₋, looking back and up) | 0.6 | 41.8 | 24 |
+| 2026-11-27 | Apple M2 Pro, Metal, Unity 6000.4.1f1 | 7 (KerrScene, lensed scene off) | 0.6 | 62.2 | 16 |
+| 2026-11-27 | Apple M2 Pro, Metal, Unity 6000.4.1f1 | 7 (KerrScene, meshes only) | 0.6 | 79.7 | 13 |
+| 2026-11-27 | Apple M2 Pro, Metal, Unity 6000.4.1f1 | 7 (KerrScene, scenery only) | 0.6 | 71.7 | 14 |
+| 2026-11-27 | Apple M2 Pro, Metal, Unity 6000.4.1f1 | 7 (KerrScene, meshes + scenery) | 0.6 | 85.2 | 12 |
 
 Phase 3 rows use 10 warm-up frames so auto exposure has settled, and each is the mean of two runs taken back to back. The same configuration drifted between 28 and 33 ms over one session (thermals), so compare rows within a phase rather than across phases. "Far view" is the Fig. 15a-style framing: camera 60 M out, 4° above the disk plane, 30° vertical field of view. An opaque disk ends rays at their first hit, so the disk makes the frame cheaper than the bare hole: rays no longer wind around the photon orbit. Bloom + ACES costs about 2.5 ms. The far view costs about 12 ms more than the demo view, not yet profiled (likely the longer path from 60 M in and more pixels on the disk's rim).
 
@@ -46,5 +50,7 @@ Streak rows turn on the orbiting pattern: `AccretionDisk.streaks` and `HotGas.cl
 The drifting, merging streaks row bends each strand across the orbit and fades runs of them into ribbons: two more noise lookups per blended cell. Off, the same session took 17.3 ms, so the disk's pattern now costs 9.5 ms where it cost 5.6. The gas clumps are unchanged.
 
 Phase 6 rows use the demo as committed in 8046a89 (ice-blue streams, disk opacity 0.34, 28° field of view) and the camera falling on the scripted plunge (key 1). In the same session the demo view took 59 ms, where the opaque disk took 27: rays now carry on through the disk. Inside the horizon a frame costs what the view holds, 72 ms toward the hole and 32 ms looking back. Not yet profiled.
+
+Phase 7 rows use `Assets/KerrDemo/KerrScene.unity` as committed in 8e0ad49, before its test objects were deleted: the demo with `LensedScene` on the hole, 3,072 triangles traced within 50 M and a 512² scenery map out to 2,000 M. The off row disables `LensedScene`; the meshes-only and scenery-only rows turn the other part off. The scene adds 23 ms against a target of 10 ms: 17 for the meshes, 9 for the scenery. With the tree search cut to the root box test, the meshes cost 0.1 ms, so their cost is the search through the median-split tree on every step that passes through the scene. Skipping steps that stay inside 15 M saved nothing. One scenery sample per step costs 3.5 ms; the samples between a step's ends, which keep thin things from slipping through, cost the other 5. In Play `LensedScene` also captures one scenery face per frame, 2.7 ms. Not yet tried: a surface-area-heuristic tree. Phase 8's lower internal resolution scales all of it.
 
 Target: 60 FPS at 1080p (spec, open question 2). Phase 8 closes the gap: STP upscaling, a lower internal resolution, adaptive step limits.

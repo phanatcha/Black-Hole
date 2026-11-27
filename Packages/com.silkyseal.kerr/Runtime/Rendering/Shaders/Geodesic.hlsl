@@ -4,6 +4,7 @@
 #include "KerrSchild.hlsl"
 #include "Disk.hlsl"
 #include "Gas.hlsl"
+#include "Scene.hlsl"
 
 // Float32 mirror of Runtime/Core/GeodesicIntegrator.cs and RayTracer.Trace. Keep the two in step:
 // GpuParityTests compares them ray by ray.
@@ -74,6 +75,13 @@ bool GeodesicStep(inout float3 x, inout float t, inout float3 p, float pt, float
     return false;
 }
 
+// Point at s ∈ [0, 1] on the cubic Hermite through both ends of a step, x and h dx/dλ at each.
+float3 KerrHermite(float3 x0, float3 v0, float3 x1, float3 v1, float s)
+{
+    float s2 = s * s, s3 = s2 * s;
+    return x0 * (2.0 * s3 - 3.0 * s2 + 1.0) + v0 * (s3 - 2.0 * s2 + s) + x1 * (3.0 * s2 - 2.0 * s3) + v1 * (s3 - s2);
+}
+
 // Mirrors RayTracer.EquatorCrossing: where and when the step meets z = 0, from (x, t) and h dx^μ/dλ at both ends.
 // A chord would put the hit radius ~0.5 % off at this tolerance.
 float4 EquatorCrossing(float4 x0, float4 v0, float4 x1, float4 v1)
@@ -93,15 +101,18 @@ float4 EquatorCrossing(float4 x0, float4 v0, float4 x1, float4 v1)
 }
 
 // Traces a past-directed null covector kLower = (p_x, p_y, p_z, p_t) from x0, shading the disk on the way when
-// _DiskEnabled and the hot gas when _GasView is on. radiance is the disk and eye-view gas light collected,
-// transmittance what still shows of the sky behind it; gas carries the 230 GHz Stokes parameters.
+// _DiskEnabled, the hot gas when _GasView is on and the meshes near the hole when _SceneEnabled. radiance is the disk
+// and eye-view gas light collected, transmittance what still shows of the sky behind it; gas carries the 230 GHz Stokes
+// parameters. scene is the light of the mesh the ray ended on, unshifted and times what showed through to it, and its
+// shift g = ν_observed / ν_emitted; g is 0 where the ray met none (or met one inside the ergosphere, which shows black).
 // Cost: at most maxSteps × 6 gradient evaluations. Capture as in RayTracer.Trace: at r₊ + margin on the way in, and at
 // once from inside r₊ when E − Ω_H L < 0, light the chart cannot follow back.
 void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRadius, int maxSteps, inout KerrGasRay gas,
-              out float3 skyDir, out int status, out float3 radiance, out float transmittance)
+              out float3 skyDir, out int status, out float3 radiance, out float transmittance, out float4 scene)
 {
     radiance = 0.0;
     transmittance = 1.0;
+    scene = 0.0;
     float horizon = KerrHorizonRadius(spin), captureRadius = horizon + KERR_HORIZON_MARGIN;
     float3 x = x0;
     float3 p = kLower.xyz;
@@ -109,6 +120,7 @@ void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRa
     float r = KerrRadius(x0, spin), previous = r;
     float h = KERR_INITIAL_STEP_PER_RADIUS * r;
     float time = 0.0; // Kerr-Schild coordinate time relative to the camera
+    float sceneryBefore = _SceneryEnabled != 0 ? KerrScenerySide(x0) : -1.0;
 
     status = KERR_STATUS_MAX_STEPS;
     if (r < horizon && pt + spin / (2.0 * horizon) * (x.x * p.y - x.y * p.x) < 0.0)
@@ -136,6 +148,70 @@ void TraceRay(float3 x0, float4 kLower, float spin, float tolerance, float farRa
             float4 crossing = EquatorCrossing(before, v0, float4(x, time), v1);
             if (!KerrDiskCrossing(crossing.xyz, crossing.w, pt, x.x * p.y - x.y * p.x, spin, radiance, transmittance))
             {
+                status = KERR_STATUS_ABSORBED;
+                break;
+            }
+        }
+        // Mirror of SceneRay.OnStep, after the disk as on the CPU: the step's chord against the meshes. The GPU's long
+        // steps sag off the bend, so where the chord hits, the hit is taken from the step's Hermite curve instead: first
+        // the piece around the chord's hit, then, if that misses, every piece. A curve that grazes a mesh the chord
+        // misses is missed with it (the sag is far under a pixel at the meshes' distances).
+        if (_SceneEnabled != 0)
+        {
+            int slot;
+            float t, u, v;
+            float3 a = before.xyz, b = x;
+            bool hit = KerrSceneHit(a, b, slot, t, u, v);
+            int pieces = hit ? (int)min(ceil(length(x - a) / (KERR_SCENE_CHORD * length(x))), KERR_SCENE_PIECES) : 1;
+            if (pieces > 1)
+            {
+                float3 v0 = KerrRaise(float4(pBefore, pt), before.xyz, spin).xyz * stepSize;
+                float3 v1 = KerrRaise(float4(p, pt), x, spin).xyz * stepSize;
+                float s0 = max(t - 1.0 / pieces, 0.0), s1 = min(t + 1.0 / pieces, 1.0);
+                a = KerrHermite(before.xyz, v0, x, v1, s0);
+                b = KerrHermite(before.xyz, v0, x, v1, s1);
+                hit = KerrSceneHit(a, b, slot, t, u, v);
+                if (!hit) b = before.xyz;
+                [loop]
+                for (int k = 1; k <= pieces && !hit; k++)
+                {
+                    a = b;
+                    b = KerrHermite(before.xyz, v0, x, v1, (float)k / pieces);
+                    hit = KerrSceneHit(a, b, slot, t, u, v);
+                }
+            }
+            if (hit)
+            {
+                float3 chord = b - a;
+                scene = float4(transmittance * KerrSceneShade(slot, u, v, chord), KerrSceneShift(a + chord * t, pt, spin));
+                transmittance = 0.0;
+                status = KERR_STATUS_ABSORBED;
+                break;
+            }
+        }
+        // The scenery map beyond them: the ray meets it where it goes from in front of the captured distance to past it,
+        // sampled at points along the chord (it barely bends out there) so thin things between the ends are not skipped.
+        if (_SceneryEnabled != 0)
+        {
+            float span = length(x - before.xyz), radius = length(x);
+            int pieces = radius + span > _SceneryNear && radius - span < _SceneryFar
+                       ? (int)clamp(ceil(span / (KERR_SCENERY_CHORD * radius)), 1.0, KERR_SCENERY_PIECES) : 1;
+            float3 a = before.xyz, at = 0.0;
+            bool hit = false;
+            [loop]
+            for (int k = 1; k <= pieces && !hit; k++)
+            {
+                float3 b = lerp(before.xyz, x, (float)k / pieces);
+                float side = KerrScenerySide(b);
+                hit = sceneryBefore < 0.0 && side >= 0.0;
+                if (hit) at = KerrSceneryCrossing(a, b);
+                sceneryBefore = side;
+                a = b;
+            }
+            if (hit)
+            {
+                scene = float4(transmittance * _SceneryLuminance * KerrScenery(at).rgb, KerrSceneShift(at, pt, spin));
+                transmittance = 0.0;
                 status = KERR_STATUS_ABSORBED;
                 break;
             }

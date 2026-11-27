@@ -1,6 +1,6 @@
 {
   "name": "com.silkyseal.kerr",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "displayName": "SilkySeal Kerr Black Hole",
   "description": "Real-time spinning (Kerr) black hole for URP: GPU null-geodesic tracing in Kerr-Schild coordinates, checked against a double-precision C# reference.",
   "unity": "6000.4",
@@ -17,5 +17,12 @@
   "dependencies": {
     "com.unity.render-pipelines.universal": "17.4.0",
     "com.unity.inputsystem": "1.19.0"
-  }
+  },
+  "samples": [
+    {
+      "displayName": "Demo",
+      "description": "The demo scene: a spinning black hole with its disk, the Milky Way and Hipparcos stars, a fly camera and the scripted plunge. Needs the Kerr renderer feature, with KerrTrace.compute assigned, on your URP renderer.",
+      "path": "Samples~/Demo"
+    }
+  ]
 }
